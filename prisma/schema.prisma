@@ -1,0 +1,1079 @@
+// SCOOP MASTER — database schema
+// Conventions:
+//  * Money columns are Decimal(14,2); quantities Decimal(14,4); unit costs Decimal(14,4).
+//  * Business dates (report dates, due dates, periods) use @db.Date and are interpreted in Asia/Manila.
+//  * Financial and inventory records are never hard-deleted. They are cancelled / voided / reversed,
+//    and every change writes an AuditLog row inside the same database transaction.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Identity & security ─────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  FINANCE
+  WAREHOUSE
+  OPERATIONS
+  PARTNER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         Role
+  partnerId    String?
+  partner      Partner?  @relation(fields: [partnerId], references: [id])
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions      Session[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@index([partnerId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String // e.g. CREATE, UPDATE, APPROVE, VOID, LOGIN
+  entityType String
+  entityId   String?
+  summary    String?
+  before     Json?
+  after      Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// Gapless human-readable numbering (PTR-0001, INV-2026-00001 …)
+model Counter {
+  key   String @id
+  value Int    @default(0)
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  entityType   String // Partner, SalesReport, Payment, Invoice, Bill, MaintenanceRecord, PartnerExpense …
+  entityId     String
+  partnerId    String? // owning partner, used for access control
+  category     String   @default("GENERAL") // CONTRACT, ID_DOCUMENT, PHOTO, PROOF_OF_PAYMENT, RECEIPT …
+  fileName     String
+  storedName   String   @unique
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  confidential Boolean  @default(false) // e.g. ID documents: hidden from partner-facing views and non-admins
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([partnerId])
+}
+
+// ───────────────────────────── Partners & contracts ─────────────────────────────
+
+enum PartnerStatus {
+  PROSPECT
+  PENDING_APPROVAL
+  ACTIVE
+  ON_HOLD
+  TERMINATED
+}
+
+model Partner {
+  id            String        @id @default(cuid())
+  code          String        @unique // PTR-0001
+  businessName  String
+  ownerName     String
+  contactNumber String?
+  email         String?
+  address       String?
+  area          String? // city / municipality / barangay used for location filtering
+  status        PartnerStatus @default(PROSPECT)
+  startDate     DateTime?     @db.Date
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  users              User[]
+  contracts          PartnerContract[]
+  location           Location?
+  machines           Machine[]
+  machineAssignments MachineAssignment[]
+  salesReports       SalesReport[]
+  productPrices      PartnerProductPrice[]
+  supplyOrders       SupplyOrder[]
+  invoices           Invoice[]
+  bills              Bill[]
+  payments           Payment[]
+  expenses           PartnerExpense[]
+  settlements        Settlement[]
+  maintenance        MaintenanceRecord[]
+
+  @@index([status])
+}
+
+enum ShareModel {
+  PROFIT_SHARE // owner gets ownerSharePct of distributable profit
+  FIXED_FEE // owner gets a fixed fee per settlement period, partner keeps the rest
+  FEE_PLUS_SHARE // fixed fee first, remainder split by ownerSharePct
+  REVENUE_SHARE // owner gets ownerSharePct of net sales; partner bears costs
+}
+
+enum CogsBasis {
+  TRANSFER_PRICE // supplies consumed valued at the price invoiced to the partner (default)
+  OWNER_COST // supplies consumed valued at the owner's cost
+}
+
+enum CashCustody {
+  PARTNER // partner keeps sales cash and remits the owner's share (creates a receivable)
+  OWNER // owner collects sales cash and pays the partner's share (creates a payable)
+}
+
+enum SettlementFrequency {
+  DAILY
+  WEEKLY
+  SEMI_MONTHLY
+  MONTHLY
+}
+
+model PartnerContract {
+  id                      String              @id @default(cuid())
+  partnerId               String
+  partner                 Partner             @relation(fields: [partnerId], references: [id])
+  version                 Int
+  effectiveFrom           DateTime            @db.Date
+  effectiveTo             DateTime?           @db.Date
+  shareModel              ShareModel          @default(PROFIT_SHARE)
+  ownerSharePct           Decimal             @default(50) @db.Decimal(5, 2)
+  partnerSharePct         Decimal             @default(50) @db.Decimal(5, 2)
+  fixedFee                Decimal             @default(0) @db.Decimal(14, 2)
+  cogsBasis               CogsBasis           @default(TRANSFER_PRICE)
+  deductOperatingExpenses Boolean             @default(true)
+  shareLosses             Boolean             @default(true)
+  cashCustody             CashCustody         @default(PARTNER)
+  settlementFrequency     SettlementFrequency @default(MONTHLY)
+  paymentTermsDays        Int                 @default(7) // due days for settlement amounts and supply invoices
+  supplyPaymentTermsDays  Int                 @default(15)
+  terms                   String? // free-text contract terms
+  isActive                Boolean             @default(true)
+  createdById             String?
+  createdAt               DateTime            @default(now())
+
+  settlements Settlement[]
+
+  @@unique([partnerId, version])
+  @@index([partnerId, isActive])
+}
+
+// ───────────────────────────── Machines ─────────────────────────────
+
+enum MachineStatus {
+  AVAILABLE
+  RESERVED
+  DEPLOYED
+  UNDER_MAINTENANCE
+  RETURNED
+  SOLD
+}
+
+enum MachineCondition {
+  NEW
+  GOOD
+  FAIR
+  POOR
+  DEFECTIVE
+}
+
+model Machine {
+  id                  String           @id @default(cuid())
+  code                String           @unique // MCH-0001
+  brand               String
+  model               String
+  machineType         String? // countertop, floor-standing …
+  nozzles             Int              @default(1)
+  serialNumber        String           @unique
+  purchaseDate        DateTime?        @db.Date
+  purchasePrice       Decimal          @default(0) @db.Decimal(14, 2)
+  warrantyExpiry      DateTime?        @db.Date
+  condition           MachineCondition @default(NEW)
+  status              MachineStatus    @default(AVAILABLE)
+  currentPartnerId    String?
+  currentPartner      Partner?         @relation(fields: [currentPartnerId], references: [id])
+  deployedAt          DateTime?        @db.Date
+  nextMaintenanceDate DateTime?        @db.Date
+  notes               String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  assignments  MachineAssignment[]
+  maintenance  MaintenanceRecord[]
+  salesReports SalesReport[]
+
+  @@index([status])
+  @@index([currentPartnerId])
+}
+
+model MachineAssignment {
+  id          String    @id @default(cuid())
+  machineId   String
+  machine     Machine   @relation(fields: [machineId], references: [id])
+  partnerId   String
+  partner     Partner   @relation(fields: [partnerId], references: [id])
+  startDate   DateTime  @db.Date
+  endDate     DateTime? @db.Date
+  reason      String?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  @@index([machineId])
+  @@index([partnerId])
+}
+
+enum MaintenanceType {
+  PREVENTIVE
+  REPAIR
+  INSPECTION
+  PROBLEM_REPORT
+}
+
+enum MaintenanceStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+model MaintenanceRecord {
+  id           String            @id @default(cuid())
+  number       String            @unique // MNT-00001
+  machineId    String
+  machine      Machine           @relation(fields: [machineId], references: [id])
+  partnerId    String?
+  partner      Partner?          @relation(fields: [partnerId], references: [id])
+  type         MaintenanceType
+  status       MaintenanceStatus @default(OPEN)
+  description  String
+  resolution   String?
+  reportedAt   DateTime          @default(now())
+  resolvedAt   DateTime?
+  cost         Decimal           @default(0) @db.Decimal(14, 2)
+  technicianId String?
+  technician   Contact?          @relation(fields: [technicianId], references: [id])
+  billId       String?           @unique
+  bill         Bill?             @relation(fields: [billId], references: [id])
+  reportedById String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([machineId])
+  @@index([status])
+}
+
+// ───────────────────────────── Inventory ─────────────────────────────
+
+enum ItemCategory {
+  ICE_CREAM_POWDER
+  CONES
+  CUPS
+  SPOONS
+  TOPPINGS
+  SYRUPS
+  PACKAGING
+  CLEANING
+  SPARE_PARTS
+  OTHER
+}
+
+enum Uom {
+  KG
+  G
+  L
+  ML
+  PC
+  BOX
+  PACK
+  BAG
+}
+
+model InventoryItem {
+  id              String       @id @default(cuid())
+  sku             String       @unique
+  name            String
+  category        ItemCategory
+  uom             Uom
+  purchaseCost    Decimal      @default(0) @db.Decimal(14, 4) // latest purchase cost per uom
+  avgCost         Decimal      @default(0) @db.Decimal(14, 4) // moving weighted-average owner cost per uom
+  partnerPrice    Decimal      @default(0) @db.Decimal(14, 4) // selling price to partners per uom
+  minStock        Decimal      @default(0) @db.Decimal(14, 4) // warehouse reorder level
+  partnerMinStock Decimal      @default(0) @db.Decimal(14, 4) // reorder level at partner locations
+  supplierId      String?
+  supplier        Contact?     @relation(fields: [supplierId], references: [id])
+  isPerishable    Boolean      @default(false)
+  isSellable      Boolean      @default(true) // can be supplied to partners
+  isActive        Boolean      @default(true)
+  notes           String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  stockLevels       StockLevel[]
+  batches           StockBatch[]
+  movements         StockMovement[]
+  recipeIngredients RecipeIngredient[]
+  productComponents ProductComponent[]
+  supplyOrderLines  SupplyOrderLine[]
+  invoiceLines      InvoiceLine[]
+  countLines        StockCountLine[]
+  salesStockLines   SalesReportStock[]
+
+  @@index([category])
+}
+
+enum LocationType {
+  WAREHOUSE
+  PARTNER
+  IN_TRANSIT
+}
+
+model Location {
+  id        String       @id @default(cuid())
+  code      String       @unique
+  name      String
+  type      LocationType
+  partnerId String?      @unique
+  partner   Partner?     @relation(fields: [partnerId], references: [id])
+  address   String?
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+
+  stockLevels StockLevel[]
+  batches     StockBatch[]
+  movements   StockMovement[]
+  counts      StockCount[]
+}
+
+model StockLevel {
+  id         String        @id @default(cuid())
+  itemId     String
+  item       InventoryItem @relation(fields: [itemId], references: [id])
+  locationId String
+  location   Location      @relation(fields: [locationId], references: [id])
+  quantity   Decimal       @default(0) @db.Decimal(14, 4)
+  updatedAt  DateTime      @updatedAt
+
+  @@unique([itemId, locationId])
+}
+
+model StockBatch {
+  id         String        @id @default(cuid())
+  itemId     String
+  item       InventoryItem @relation(fields: [itemId], references: [id])
+  locationId String
+  location   Location      @relation(fields: [locationId], references: [id])
+  batchNo    String
+  expiryDate DateTime?     @db.Date
+  quantity   Decimal       @default(0) @db.Decimal(14, 4)
+  createdAt  DateTime      @default(now())
+
+  movements StockMovement[]
+
+  @@unique([itemId, locationId, batchNo])
+  @@index([expiryDate])
+}
+
+enum MovementType {
+  RECEIPT // purchase received into warehouse
+  ISSUE // internal issue / use (e.g. spare parts for repairs)
+  TRANSFER_OUT
+  TRANSFER_IN
+  ADJUSTMENT // manual correction (+/-)
+  RETURN_IN // goods returned into a location (e.g. partner → warehouse return)
+  RETURN_OUT // goods returned out of a location (to supplier / back to warehouse)
+  DAMAGED
+  EXPIRED
+  CONSUMPTION // theoretical ingredient usage from approved sales reports
+  WASTAGE // reported wastage from sales reports
+  COUNT_VARIANCE // physical count difference
+  REVERSAL // reverses a previous movement
+}
+
+model StockMovement {
+  id           String         @id @default(cuid())
+  number       String         @unique // MV-0000001
+  type         MovementType
+  itemId       String
+  item         InventoryItem  @relation(fields: [itemId], references: [id])
+  locationId   String
+  location     Location       @relation(fields: [locationId], references: [id])
+  quantity     Decimal        @db.Decimal(14, 4) // signed: + into location, - out of location
+  unitCost     Decimal        @db.Decimal(14, 4) // owner cost snapshot
+  unitPrice    Decimal        @db.Decimal(14, 4) // partner transfer price snapshot
+  balanceAfter Decimal        @db.Decimal(14, 4)
+  batchId      String?
+  batch        StockBatch?    @relation(fields: [batchId], references: [id])
+  groupId      String? // links paired movements (transfer out/in)
+  sourceType   String? // SupplyOrder, SalesReport, StockCount, Manual …
+  sourceId     String?
+  reversesId   String?        @unique
+  reverses     StockMovement? @relation("Reversal", fields: [reversesId], references: [id])
+  reversedBy   StockMovement? @relation("Reversal")
+  reason       String?
+  createdById  String?
+  occurredAt   DateTime       @default(now())
+  createdAt    DateTime       @default(now())
+
+  @@index([itemId, locationId, occurredAt])
+  @@index([locationId, occurredAt])
+  @@index([sourceType, sourceId])
+}
+
+enum StockCountStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+model StockCount {
+  id          String           @id @default(cuid())
+  number      String           @unique
+  locationId  String
+  location    Location         @relation(fields: [locationId], references: [id])
+  countDate   DateTime         @db.Date
+  status      StockCountStatus @default(DRAFT)
+  notes       String?
+  createdById String?
+  postedById  String?
+  postedAt    DateTime?
+  createdAt   DateTime         @default(now())
+
+  lines StockCountLine[]
+}
+
+model StockCountLine {
+  id         String        @id @default(cuid())
+  countId    String
+  count      StockCount    @relation(fields: [countId], references: [id], onDelete: Cascade)
+  itemId     String
+  item       InventoryItem @relation(fields: [itemId], references: [id])
+  systemQty  Decimal       @db.Decimal(14, 4)
+  countedQty Decimal?      @db.Decimal(14, 4)
+  reason     String?
+
+  @@unique([countId, itemId])
+}
+
+// ───────────────────────────── Recipes & products ─────────────────────────────
+
+model Recipe {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  flavor     String?
+  yieldGrams Decimal  @db.Decimal(14, 2) // expected mix output, e.g. 3700 g
+  wastagePct Decimal  @default(0) @db.Decimal(5, 2) // expected wastage assumption
+  notes      String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  ingredients RecipeIngredient[]
+  products    Product[]
+}
+
+model RecipeIngredient {
+  id       String         @id @default(cuid())
+  recipeId String
+  recipe   Recipe         @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  itemId   String? // null for free ingredients such as water
+  item     InventoryItem? @relation(fields: [itemId], references: [id])
+  name     String // display name (copied from item, or e.g. "Water")
+  quantity Decimal        @db.Decimal(14, 4)
+  uom      Uom
+  unitCost Decimal        @default(0) @db.Decimal(14, 4) // only used when itemId is null (cost per uom)
+}
+
+enum ProductType {
+  CONE
+  CUP
+  OTHER
+}
+
+model Product {
+  id           String      @id @default(cuid())
+  code         String      @unique
+  name         String
+  type         ProductType
+  recipeId     String?
+  recipe       Recipe?     @relation(fields: [recipeId], references: [id])
+  servingGrams Decimal     @default(0) @db.Decimal(10, 2)
+  defaultPrice Decimal     @db.Decimal(14, 2)
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  components    ProductComponent[]
+  partnerPrices PartnerProductPrice[]
+  salesLines    SalesReportLine[]
+}
+
+model ProductComponent {
+  id        String        @id @default(cuid())
+  productId String
+  product   Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      InventoryItem @relation(fields: [itemId], references: [id])
+  quantity  Decimal       @db.Decimal(14, 4)
+  uom       Uom
+}
+
+model PartnerProductPrice {
+  id        String   @id @default(cuid())
+  partnerId String
+  partner   Partner  @relation(fields: [partnerId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  price     Decimal  @db.Decimal(14, 2)
+  isActive  Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  @@unique([partnerId, productId])
+}
+
+// ───────────────────────────── Sales reports ─────────────────────────────
+
+enum SalesReportStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+model SalesReport {
+  id               String            @id @default(cuid())
+  number           String            @unique // SR-0000001
+  partnerId        String
+  partner          Partner           @relation(fields: [partnerId], references: [id])
+  machineId        String?
+  machine          Machine?          @relation(fields: [machineId], references: [id])
+  reportDate       DateTime          @db.Date
+  status           SalesReportStatus @default(DRAFT)
+  source           String            @default("MANUAL") // MANUAL, POS, QR …
+  // computed totals (snapshotted at submission)
+  totalUnits       Int               @default(0)
+  grossSales       Decimal           @default(0) @db.Decimal(14, 2)
+  discounts        Decimal           @default(0) @db.Decimal(14, 2)
+  refunds          Decimal           @default(0) @db.Decimal(14, 2)
+  netSales         Decimal           @default(0) @db.Decimal(14, 2)
+  reportedTotal    Decimal           @default(0) @db.Decimal(14, 2) // total the partner declares
+  salesVariance    Decimal           @default(0) @db.Decimal(14, 2) // reportedTotal - netSales
+  cashSales        Decimal           @default(0) @db.Decimal(14, 2)
+  gcashSales       Decimal           @default(0) @db.Decimal(14, 2)
+  otherSales       Decimal           @default(0) @db.Decimal(14, 2)
+  expectedCash     Decimal           @default(0) @db.Decimal(14, 2)
+  actualCash       Decimal           @default(0) @db.Decimal(14, 2)
+  cashVariance     Decimal           @default(0) @db.Decimal(14, 2) // actual - expected (+ overage / - shortage)
+  wastageUnits     Int               @default(0)
+  estimatedCogs    Decimal           @default(0) @db.Decimal(14, 2) // theoretical, at transfer price
+  estimatedProfit  Decimal           @default(0) @db.Decimal(14, 2)
+  hasDiscrepancy   Boolean           @default(false)
+  discrepancyNotes String?
+  notes            String?
+  reviewNotes      String?
+  submittedAt      DateTime?
+  submittedById    String?
+  reviewedAt       DateTime?
+  reviewedById     String?
+  settlementId     String?
+  settlement       Settlement?       @relation(fields: [settlementId], references: [id])
+  revision         Int               @default(0)
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  lines        SalesReportLine[]
+  stockLines   SalesReportStock[]
+  editRequests SalesEditRequest[]
+
+  @@unique([partnerId, machineId, reportDate])
+  @@index([reportDate])
+  @@index([status])
+}
+
+model SalesReportLine {
+  id         String      @id @default(cuid())
+  reportId   String
+  report     SalesReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product     @relation(fields: [productId], references: [id])
+  quantity   Int
+  unitPrice  Decimal     @db.Decimal(14, 2) // snapshot of the partner's configured price
+  lineTotal  Decimal     @db.Decimal(14, 2)
+  wastageQty Int         @default(0)
+  unitCost   Decimal     @default(0) @db.Decimal(14, 4) // theoretical cost per unit at transfer price
+
+  @@unique([reportId, productId])
+}
+
+model SalesReportStock {
+  id       String        @id @default(cuid())
+  reportId String
+  report   SalesReport   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  itemId   String
+  item     InventoryItem @relation(fields: [itemId], references: [id])
+  opening  Decimal       @db.Decimal(14, 4)
+  received Decimal       @default(0) @db.Decimal(14, 4)
+  closing  Decimal       @db.Decimal(14, 4)
+
+  @@unique([reportId, itemId])
+}
+
+enum EditRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model SalesEditRequest {
+  id            String            @id @default(cuid())
+  reportId      String
+  report        SalesReport       @relation(fields: [reportId], references: [id])
+  reason        String
+  status        EditRequestStatus @default(PENDING)
+  requestedById String
+  reviewedById  String?
+  reviewedAt    DateTime?
+  reviewNotes   String?
+  createdAt     DateTime          @default(now())
+}
+
+// ───────────────────────────── Supply orders ─────────────────────────────
+
+enum SupplyOrderStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PREPARING
+  DISPATCHED
+  RECEIVED
+  CANCELLED
+}
+
+model SupplyOrder {
+  id             String            @id @default(cuid())
+  number         String            @unique // SO-00001
+  partnerId      String
+  partner        Partner           @relation(fields: [partnerId], references: [id])
+  status         SupplyOrderStatus @default(REQUESTED)
+  requestedAt    DateTime          @default(now())
+  requestedById  String?
+  notes          String?
+  reviewNotes    String?
+  approvedAt     DateTime?
+  approvedById   String?
+  dispatchedAt   DateTime?
+  dispatchedById String?
+  receivedAt     DateTime?
+  receivedById   String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  lines   SupplyOrderLine[]
+  invoice Invoice?
+}
+
+model SupplyOrderLine {
+  id           String        @id @default(cuid())
+  orderId      String
+  order        SupplyOrder   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemId       String
+  item         InventoryItem @relation(fields: [itemId], references: [id])
+  requestedQty Decimal       @db.Decimal(14, 4)
+  approvedQty  Decimal?      @db.Decimal(14, 4)
+  receivedQty  Decimal?      @db.Decimal(14, 4)
+  unitCost     Decimal       @default(0) @db.Decimal(14, 4) // snapshot at dispatch
+  unitPrice    Decimal       @default(0) @db.Decimal(14, 4) // snapshot at approval
+
+  @@unique([orderId, itemId])
+}
+
+// ───────────────────────────── Finance ─────────────────────────────
+
+enum ContactType {
+  SUPPLIER
+  CUSTOMER
+  DELIVERY_PROVIDER
+  TECHNICIAN
+  EMPLOYEE
+  INSTALLMENT_BUYER
+  OTHER
+}
+
+model Contact {
+  id            String      @id @default(cuid())
+  type          ContactType
+  name          String
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  notes         String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+
+  items       InventoryItem[]
+  invoices    Invoice[]
+  bills       Bill[]
+  payments    Payment[]
+  maintenance MaintenanceRecord[]
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+  // OVERDUE is derived (due date passed and balance > 0) so it can never be stale.
+}
+
+enum InvoiceType {
+  SUPPLY // supplies sold to a partner (markup income)
+  PARTNERSHIP_SHARE // owner's share due from a partner per settlement (collection document)
+  MACHINE_SALE
+  MACHINE_RENTAL
+  INSTALLMENT
+  OTHER
+}
+
+// Accounts receivable document
+model Invoice {
+  id            String        @id @default(cuid())
+  number        String        @unique
+  type          InvoiceType
+  partnerId     String?
+  partner       Partner?      @relation(fields: [partnerId], references: [id])
+  contactId     String?
+  contact       Contact?      @relation(fields: [contactId], references: [id])
+  description   String
+  issueDate     DateTime      @db.Date
+  dueDate       DateTime      @db.Date
+  paymentTerms  String?
+  amount        Decimal       @db.Decimal(14, 2)
+  costAmount    Decimal       @default(0) @db.Decimal(14, 2) // owner cost of goods on SUPPLY invoices
+  amountPaid    Decimal       @default(0) @db.Decimal(14, 2)
+  status        PaymentStatus @default(UNPAID)
+  supplyOrderId String?       @unique
+  supplyOrder   SupplyOrder?  @relation(fields: [supplyOrderId], references: [id])
+  settlementId  String?       @unique
+  settlement    Settlement?   @relation("SettlementInvoice", fields: [settlementId], references: [id])
+  cancelledAt   DateTime?
+  cancelReason  String?
+  createdById   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  lines       InvoiceLine[]
+  allocations PaymentAllocation[]
+
+  @@index([partnerId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model InvoiceLine {
+  id          String         @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  itemId      String?
+  item        InventoryItem? @relation(fields: [itemId], references: [id])
+  description String
+  quantity    Decimal        @db.Decimal(14, 4)
+  unitPrice   Decimal        @db.Decimal(14, 4)
+  unitCost    Decimal        @default(0) @db.Decimal(14, 4)
+  lineTotal   Decimal        @db.Decimal(14, 2)
+  lineCost    Decimal        @default(0) @db.Decimal(14, 2)
+}
+
+enum ExpenseCategory {
+  INGREDIENT_PURCHASE
+  PACKAGING_PURCHASE
+  TRANSPORTATION
+  DELIVERY
+  MACHINE_REPAIR
+  MAINTENANCE
+  SALARIES
+  MARKETING
+  UTILITIES
+  RENT
+  MACHINE_PURCHASE
+  PARTNER_PAYOUT // partner share payable (cash custody = OWNER) – not an operating expense
+  OTHER
+}
+
+// Accounts payable document. Every owner expense is a Bill (paid immediately or on credit),
+// so expenses are counted exactly once.
+model Bill {
+  id           String          @id @default(cuid())
+  number       String          @unique
+  category     ExpenseCategory
+  contactId    String?
+  contact      Contact?        @relation(fields: [contactId], references: [id])
+  partnerId    String?
+  partner      Partner?        @relation(fields: [partnerId], references: [id])
+  payeeName    String
+  description  String
+  billDate     DateTime        @db.Date
+  dueDate      DateTime        @db.Date
+  paymentTerms String?
+  amount       Decimal         @db.Decimal(14, 2)
+  amountPaid   Decimal         @default(0) @db.Decimal(14, 2)
+  status       PaymentStatus   @default(UNPAID)
+  settlementId String?         @unique
+  settlement   Settlement?     @relation("SettlementBill", fields: [settlementId], references: [id])
+  cancelledAt  DateTime?
+  cancelReason String?
+  createdById  String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  allocations PaymentAllocation[]
+  maintenance MaintenanceRecord?
+
+  @@index([dueDate])
+  @@index([status])
+  @@index([category])
+}
+
+enum PaymentDirection {
+  IN
+  OUT
+}
+
+enum PaymentMethod {
+  CASH
+  GCASH
+  BANK_TRANSFER
+  OTHER
+}
+
+enum PaymentRecordStatus {
+  PENDING_VERIFICATION // submitted by a partner, awaiting finance verification
+  CONFIRMED
+  REJECTED
+  VOIDED
+}
+
+model Payment {
+  id           String              @id @default(cuid())
+  number       String              @unique // RCPT-00001 / PAY-00001
+  direction    PaymentDirection
+  status       PaymentRecordStatus @default(CONFIRMED)
+  paymentDate  DateTime            @db.Date
+  amount       Decimal             @db.Decimal(14, 2)
+  method       PaymentMethod
+  reference    String?
+  partyName    String
+  partnerId    String?
+  partner      Partner?            @relation(fields: [partnerId], references: [id])
+  contactId    String?
+  contact      Contact?            @relation(fields: [contactId], references: [id])
+  notes        String?
+  voidReason   String?
+  createdById  String?
+  verifiedById String?
+  verifiedAt   DateTime?
+  createdAt    DateTime            @default(now())
+
+  allocations PaymentAllocation[]
+
+  @@index([paymentDate])
+  @@index([partnerId])
+}
+
+model PaymentAllocation {
+  id        String   @id @default(cuid())
+  paymentId String
+  payment   Payment  @relation(fields: [paymentId], references: [id])
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+  billId    String?
+  bill      Bill?    @relation(fields: [billId], references: [id])
+  amount    Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([billId])
+}
+
+// ───────────────────────────── Partnership operations ─────────────────────────────
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ExpensePaidBy {
+  PARTNER
+  OWNER
+}
+
+// Operating expenses incurred at a partner location (deducted in profit sharing when approved).
+// These are partnership expenses, NOT owner bills, so they are never counted twice.
+model PartnerExpense {
+  id            String        @id @default(cuid())
+  number        String        @unique
+  partnerId     String
+  partner       Partner       @relation(fields: [partnerId], references: [id])
+  expenseDate   DateTime      @db.Date
+  category      String
+  description   String
+  amount        Decimal       @db.Decimal(14, 2)
+  paidBy        ExpensePaidBy @default(PARTNER)
+  status        ExpenseStatus @default(PENDING)
+  reviewNotes   String?
+  submittedById String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  settlementId  String?
+  settlement    Settlement?   @relation(fields: [settlementId], references: [id])
+  createdAt     DateTime      @default(now())
+
+  @@index([partnerId, expenseDate])
+}
+
+enum SettlementStatus {
+  DRAFT
+  PENDING_APPROVAL
+  FINALIZED
+  VOIDED
+}
+
+model Settlement {
+  id                        String           @id @default(cuid())
+  number                    String           @unique // STL-2026-0001
+  partnerId                 String
+  partner                   Partner          @relation(fields: [partnerId], references: [id])
+  contractId                String
+  contract                  PartnerContract  @relation(fields: [contractId], references: [id])
+  periodStart               DateTime         @db.Date
+  periodEnd                 DateTime         @db.Date
+  status                    SettlementStatus @default(DRAFT)
+  grossSales                Decimal          @default(0) @db.Decimal(14, 2)
+  discounts                 Decimal          @default(0) @db.Decimal(14, 2)
+  refunds                   Decimal          @default(0) @db.Decimal(14, 2)
+  netSales                  Decimal          @default(0) @db.Decimal(14, 2)
+  suppliesConsumed          Decimal          @default(0) @db.Decimal(14, 2) // COGS per contract basis
+  operatingExpenses         Decimal          @default(0) @db.Decimal(14, 2)
+  distributableProfit       Decimal          @default(0) @db.Decimal(14, 2)
+  fixedFee                  Decimal          @default(0) @db.Decimal(14, 2)
+  ownerShare                Decimal          @default(0) @db.Decimal(14, 2)
+  partnerShare              Decimal          @default(0) @db.Decimal(14, 2)
+  ownerPaidExpenses         Decimal          @default(0) @db.Decimal(14, 2)
+  partnerPaidExpenses       Decimal          @default(0) @db.Decimal(14, 2)
+  netDueToOwner             Decimal          @default(0) @db.Decimal(14, 2) // + partner pays owner, - owner pays partner
+  supplyMarkupInPeriod      Decimal          @default(0) @db.Decimal(14, 2) // informational, NOT part of the split
+  supplyInvoicesOutstanding Decimal          @default(0) @db.Decimal(14, 2) // informational, separate AR
+  calculation               Json? // full traceable breakdown (source ids, terms snapshot)
+  notes                     String?
+  preparedById              String?
+  submittedAt               DateTime?
+  approvedById              String?
+  finalizedAt               DateTime?
+  voidedAt                  DateTime?
+  voidReason                String?
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+
+  salesReports SalesReport[]
+  expenses     PartnerExpense[]
+  invoice      Invoice?         @relation("SettlementInvoice")
+  bill         Bill?            @relation("SettlementBill")
+
+  @@index([partnerId, periodStart, periodEnd])
+}
+
+// ───────────────────────────── Notifications ─────────────────────────────
+
+enum NotificationType {
+  MISSING_SALES_REPORT
+  LOW_STOCK
+  EXPIRING_STOCK
+  SUPPLY_REQUEST
+  PAYMENT_SUBMITTED
+  PAYMENT_OVERDUE
+  PAYMENT_DUE_SOON
+  MAINTENANCE_DUE
+  MACHINE_PROBLEM
+  SALES_DROP
+  CASH_DISCREPANCY
+  SETTLEMENT_READY
+  CONTRACT_EXPIRING
+  SALES_SUBMITTED
+  EDIT_REQUEST
+  GENERAL
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  severity  Severity         @default(INFO)
+  title     String
+  body      String?
+  link      String?
+  dedupeKey String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt])
+}
+
+model NotificationRule {
+  id            String           @id @default(cuid())
+  type          NotificationType @unique
+  enabled       Boolean          @default(true)
+  roles         Role[]
+  notifyPartner Boolean          @default(false)
+  threshold     Decimal?         @db.Decimal(14, 2) // meaning depends on type (days, percent …)
+  updatedAt     DateTime         @updatedAt
+}
