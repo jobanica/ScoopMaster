@@ -9,11 +9,11 @@ import { fmtDate, fmtDateTime, todayDate } from "@/lib/dates";
 import { UOM_LABEL } from "@/lib/units";
 import { one, type SP } from "@/lib/params";
 import { balanceOf, effectiveStatus } from "@/lib/calc/payments";
-import { partnerPricing } from "@/server/services/sales";
+import { countDrivers, partnerPricing } from "@/server/services/sales";
 import { Alert, Badge, Card, DL, Empty, LinkButton, PageHeader, Peso, StatusBadge, Stat, Tabs, humanize } from "@/components/ui";
 import { ActionForm, Checkbox, ConfirmAction, DateField, Field, SelectField, SubmitButton, TextArea } from "@/components/forms";
 import { Attachments } from "@/components/attachments";
-import { changeStatusAction, createContractAction, createPartnerUserAction, setPriceAction } from "../actions";
+import { changeStatusAction, createContractAction, createPartnerUserAction, setCountProductAction, setPriceAction } from "../actions";
 
 const NEXT_STATUS: Record<PartnerStatus, PartnerStatus[]> = {
   PROSPECT: ["PENDING_APPROVAL", "TERMINATED"],
@@ -101,6 +101,7 @@ export default async function PartnerDetail({ params, searchParams }: { params: 
                   ["Operating expenses", c.deductOperatingExpenses ? "Deducted before split" : "Not deducted"],
                   ["Losses", c.shareLosses ? "Shared" : "Borne by partner"],
                   ["Sales cash held by", c.cashCustody === "PARTNER" ? "Partner (remits owner share)" : "Owner (pays partner share)"],
+                  ["Sales reporting", c.reportingMethod === "INVENTORY_COUNT" ? "Closing inventory count" : "Units sold (theoretical usage)"],
                   ["Settlement", humanize(c.settlementFrequency)],
                   ["Settlement terms", `Net ${c.paymentTermsDays} days`],
                   ["Supply invoice terms", `Net ${c.supplyPaymentTermsDays} days`],
@@ -125,12 +126,13 @@ export default async function PartnerDetail({ params, searchParams }: { params: 
                 </div>
                 <SelectField label="Supplies consumed valued at" name="cogsBasis" defaultValue={active?.cogsBasis ?? "TRANSFER_PRICE"} options={[{ value: "TRANSFER_PRICE", label: "Price charged to partner (default)" }, { value: "OWNER_COST", label: "Owner's cost" }]} />
                 <SelectField label="Who holds the sales cash?" name="cashCustody" defaultValue={active?.cashCustody ?? "PARTNER"} options={[{ value: "PARTNER", label: "Partner – remits owner share" }, { value: "OWNER", label: "Owner – pays partner share" }]} />
-                <SelectField label="Settlement schedule" name="settlementFrequency" defaultValue={active?.settlementFrequency ?? "MONTHLY"} options={[{ value: "DAILY", label: "Daily" }, { value: "WEEKLY", label: "Weekly" }, { value: "SEMI_MONTHLY", label: "Every 15 days" }, { value: "MONTHLY", label: "Monthly" }]} />
+                <SelectField label="How daily sales are reported" name="reportingMethod" defaultValue={active?.reportingMethod ?? "INVENTORY_COUNT"} options={[{ value: "INVENTORY_COUNT", label: "Closing count of cups, cones & powder (sales derived)" }, { value: "THEORETICAL", label: "Partner reports units sold" }]} />
+                <SelectField label="Settlement schedule" name="settlementFrequency" defaultValue={active?.settlementFrequency ?? "DAILY"} options={[{ value: "DAILY", label: "Daily" }, { value: "WEEKLY", label: "Weekly" }, { value: "SEMI_MONTHLY", label: "Every 15 days" }, { value: "MONTHLY", label: "Monthly" }]} />
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Settlement terms (days)" name="paymentTermsDays" type="number" min="0" defaultValue={active?.paymentTermsDays ?? 7} />
                   <Field label="Supply terms (days)" name="supplyPaymentTermsDays" type="number" min="0" defaultValue={active?.supplyPaymentTermsDays ?? 15} />
                 </div>
-                <Checkbox label="Deduct approved operating expenses before sharing" name="deductOperatingExpenses" defaultChecked={active?.deductOperatingExpenses ?? true} />
+                <Checkbox label="Deduct approved operating expenses before sharing" name="deductOperatingExpenses" defaultChecked={active?.deductOperatingExpenses ?? false} hint="Leave unticked to share gross profit (sales − cups, cones, powder)" />
                 <Checkbox label="Share losses by the same percentage" name="shareLosses" defaultChecked={active?.shareLosses ?? true} />
                 <TextArea label="Contract terms / notes" name="terms" defaultValue={active?.terms} />
                 <SubmitButton>Save contract</SubmitButton>
@@ -201,9 +203,28 @@ export default async function PartnerDetail({ params, searchParams }: { params: 
 }
 
 async function PricesTab({ partnerId, canEdit }: { partnerId: string; canEdit: boolean }) {
-  const pricing = await partnerPricing(prisma, partnerId);
+  const [pricing, drivers] = await Promise.all([partnerPricing(prisma, partnerId), countDrivers(prisma, partnerId)]);
   if (!pricing.length) return <Empty>No active products. <Link className="link" href="/recipes/products">Create products</Link> first.</Empty>;
   return (
+    <div className="space-y-4">
+    <Card title="Closing-count pricing (each cone / cup used counts as one sale of…)" pad={false}>
+      <table className="tbl"><thead><tr><th>Container</th><th>Priced as product</th><th className="num">Price</th>{canEdit && <th>Change</th>}</tr></thead>
+        <tbody>{drivers.map((d) => (
+          <tr key={d.item.id}>
+            <td>{d.item.name}</td>
+            <td>{d.product ? <>{d.product.name} {!d.configured && <Badge tone="sky">auto</Badge>}</> : d.candidates.length > 1 ? <Badge tone="berry">choose a product</Badge> : <span className="text-choco-500">no product uses this item</span>}</td>
+            <td className="num">{d.product ? <Peso v={pricing.find((p) => p.product.id === d.product!.id)?.price ?? d.product.defaultPrice} /> : "—"}</td>
+            {canEdit && <td>{d.candidates.length > 0 && (
+              <ActionForm action={setCountProductAction} className="flex items-center gap-2">
+                <input type="hidden" name="partnerId" value={partnerId} /><input type="hidden" name="itemId" value={d.item.id} />
+                <select className="input w-56" name="productId" defaultValue={d.configured ? d.product?.id : ""}><option value="">Automatic</option>{d.candidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                <SubmitButton className="btn-secondary btn-sm">Save</SubmitButton>
+              </ActionForm>
+            )}</td>}
+          </tr>
+        ))}</tbody></table>
+      <p className="px-5 py-3 text-xs text-choco-500">Used for partners on closing-count reporting. If only one product uses a container it is chosen automatically.</p>
+    </Card>
     <Card title="Selling prices for this partner" pad={false}>
       <div className="table-wrap"><table className="tbl">
         <thead><tr><th>Product</th><th className="num">Default price</th><th className="num">Partner price</th><th className="num">Theoretical cost</th><th className="num">Margin</th>{canEdit && <th>Set partner price</th>}</tr></thead>
@@ -226,6 +247,7 @@ async function PricesTab({ partnerId, canEdit }: { partnerId: string; canEdit: b
       </table></div>
       <p className="px-5 py-3 text-xs text-choco-500">Leave blank and save to revert to the default price. Theoretical cost uses supply prices charged to the partner.</p>
     </Card>
+    </div>
   );
 }
 

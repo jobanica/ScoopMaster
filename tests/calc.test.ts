@@ -167,3 +167,49 @@ describe("formatting", () => {
     expect(() => convertQty(1, "PC", "KG")).toThrow();
   });
 });
+
+import { computeCountReport } from "@/lib/calc/count";
+
+describe("inventory-count reporting", () => {
+  // Cone 80 g @ ₱25; 1 kg powder makes 3,700 g mix → 80/3700 kg powder per cone
+  const perCone = new Map([["powder", D(80).dividedBy(3700)], ["cone", D(1)]]);
+  const perCup = new Map([["powder", D(100).dividedBy(3700)], ["cup", D(1)], ["spoon", D(1)]]);
+  const consumption = new Map([["CONE80", perCone], ["CUP100", perCup]]);
+  const drivers = [{ containerItemId: "cone", productId: "CONE80", price: "25" }, { containerItemId: "cup", productId: "CUP100", price: "35" }];
+  const base = [
+    { itemId: "cone", name: "Cones", expected: "300", closing: "248", wasted: "2", unitValue: "2", isContainer: true },
+    { itemId: "cup", name: "Cups", expected: "100", closing: "80", wasted: "0", unitValue: "2.5", isContainer: true },
+    { itemId: "powder", name: "Powder", expected: "4", closing: "2.38", unitValue: "420", isContainer: false },
+    { itemId: "spoon", name: "Spoons", expected: "100", closing: null, unitValue: "0.5", isContainer: false },
+  ];
+
+  it("derives units sold, sales, cost of goods and gross profit from closing counts", () => {
+    const r = computeCountReport(base, drivers, consumption, { tolerancePct: 15 });
+    // cones used 52, wasted 2 → 50 sold; cups 20 sold
+    expect(r.lines.find((l) => l.productId === "CONE80")!.quantity).toBe(50);
+    expect(r.lines.find((l) => l.productId === "CUP100")!.quantity).toBe(20);
+    expect(r.grossSales.toFixed(2)).toBe("1950.00"); // 50×25 + 20×35
+    // cost: cones 52×2=104, cups 20×2.5=50, powder 1.62×420=680.40, spoons (not counted → 20 estimated)×0.5=10
+    expect(r.cogs.toFixed(2)).toBe("844.40");
+    const gp = r.grossSales.minus(r.cogs);
+    expect(gp.toFixed(2)).toBe("1105.60");
+    // powder needed = (50×80 + 20×100)/3700 = 1.6216 kg; used 1.62 → within tolerance
+    expect(r.checks[0].flagged).toBe(false);
+  });
+  it("flags powder used well beyond what the counted cones/cups explain", () => {
+    const r = computeCountReport(base.map((i) => (i.itemId === "powder" ? { ...i, closing: "1.5" } : i)), drivers, consumption, { tolerancePct: 15 });
+    expect(r.checks[0].flagged).toBe(true); // 2.5 kg used vs 1.62 kg needed ≈ +54%
+    expect(r.checks[0].variancePct!.toFixed(0)).toBe("54");
+  });
+  it("rejects impossible counts", () => {
+    expect(() => computeCountReport(base.map((i) => (i.itemId === "cone" ? { ...i, closing: "301" } : i)), drivers, consumption, { tolerancePct: 15 })).toThrow(/expected on hand|should be on hand/);
+    expect(() => computeCountReport(base.map((i) => (i.itemId === "cone" ? { ...i, closing: null } : i)), drivers, consumption, { tolerancePct: 15 })).toThrow(/count Cones/);
+    expect(() => computeCountReport(base.map((i) => (i.itemId === "cup" ? { ...i, closing: "80.5" } : i)), drivers, consumption, { tolerancePct: 15 })).toThrow(/whole pieces/);
+  });
+  it("splits the day's gross profit 50/50", () => {
+    const r = computeCountReport(base, drivers, consumption, { tolerancePct: 15 });
+    const s = computeSettlement({ terms: { ...{ shareModel: "PROFIT_SHARE", ownerSharePct: 50, fixedFee: 0, deductOperatingExpenses: false, shareLosses: true, cashCustody: "PARTNER" } as const }, grossSales: r.grossSales, discounts: 0, refunds: 0, suppliesConsumed: r.cogs, expenses: [] });
+    expect(s.ownerShare.toFixed(2)).toBe("552.80");
+    expect(s.partnerShare.toFixed(2)).toBe("552.80");
+  });
+});

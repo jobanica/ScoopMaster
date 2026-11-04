@@ -59,8 +59,9 @@ Demo logins use password `DemoPass123`: `admin.demo@`, `finance.demo@`, `warehou
 4. **Receive opening stock** (Inventory → Stock operations → Receive) — sets weighted-average cost.
 5. **Recipes** (e.g. 1 kg powder + 2.7 L water → 3,700 g, 5 % wastage) and **products** (serving size, components, default price).
 6. **Machines** (Machines → Add).
-7. **Partners**: create → add contract (share model, %, cash custody, settlement schedule, terms) → set status Active
-   → deploy machine → set partner-specific prices (Prices tab) → create the partner's portal login (Portal users tab).
+7. **Partners**: create → add contract (share model, %, cash custody, settlement schedule, **sales reporting = closing count**, terms) → set status Active
+   → deploy machine → set partner-specific prices and, if several products use the same cone/cup, which product each
+   counted cone/cup is sold as (Prices tab) → create the partner's portal login (Portal users tab).
 8. **Initial supplies**: Supply Orders → New order for partner → approve → dispatch → confirm receipt (creates the supply invoice).
 9. Schedule alerts and backups (below).
 
@@ -68,7 +69,9 @@ Demo logins use password `DemoPass123`: `admin.demo@`, `finance.demo@`, `warehou
 
 | When | Who | Where |
 |---|---|---|
-| Daily | Partners submit sales (portal) · Admin approves clean reports in bulk, reviews discrepancies | Sales Reports |
+| Daily (closing) | Partners submit their **closing count** of cups, cones and powder in the portal; sales, cost, gross profit and the 50/50 split are calculated automatically | Portal → Sales |
+| Daily | Admin approves clean reports in bulk, reviews discrepancies (cash, powder check) | Sales Reports |
+| Daily | Finance: "Create all due settlements" · Admin: "Finalize pending" | Settlements |
 | As needed | Supply requests → approve → dispatch → partner confirms receipt | Supply Orders |
 | As needed | Verify partner payment proofs; record collections and bills | Finance / Collections |
 | Per contract schedule | Finance creates & submits settlement → Admin approves | Settlements |

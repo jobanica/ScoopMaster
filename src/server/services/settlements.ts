@@ -234,3 +234,65 @@ export function periodEndFor(start: Date, f: SettlementFrequency): Date {
     case "MONTHLY": return endOfMonth(start);
   }
 }
+
+// ───────────── Bulk operations (daily settlements across many partners) ─────────────
+
+async function periodHasData(partnerId: string, start: Date, end: Date) {
+  const loc = await prisma.location.findUnique({ where: { partnerId } });
+  const [reports, expenses, moves] = await Promise.all([
+    prisma.salesReport.count({ where: { partnerId, reportDate: { gte: start, lte: end }, status: { not: "DRAFT" } } }),
+    prisma.partnerExpense.count({ where: { partnerId, expenseDate: { gte: start, lte: end }, status: { not: "REJECTED" } } }),
+    loc ? prisma.stockMovement.count({ where: { locationId: loc.id, type: { in: COGS_MOVEMENT_TYPES }, occurredAt: { gte: manilaDayStart(start), lt: manilaDayStart(addDays(end, 1)) } } }) : 0,
+  ]);
+  return reports + expenses + moves > 0;
+}
+
+/**
+ * Creates (and optionally submits) every settlement that is due per each partner's schedule, up to yesterday.
+ * Consecutive periods without any activity are merged into the next period, so closed days don't create empty settlements.
+ */
+export async function createDueSettlements(actor: Actor, opts: { submit: boolean }) {
+  const today = todayDate();
+  const partners = await prisma.partner.findMany({ where: { status: { in: ["ACTIVE", "ON_HOLD"] }, contracts: { some: {} } }, orderBy: { businessName: "asc" } });
+  const result = { created: 0, submitted: 0, skipped: [] as string[] };
+  for (const p of partners) {
+    for (let guard = 0; guard < 400; guard++) {
+      const last = await prisma.settlement.findFirst({ where: { partnerId: p.id, status: { not: "VOIDED" } }, orderBy: { periodEnd: "desc" } });
+      const first = await prisma.partnerContract.findFirst({ where: { partnerId: p.id }, orderBy: { version: "asc" } });
+      const start = last ? addDays(last.periodEnd, 1) : first!.effectiveFrom;
+      const contract = await contractOn(prisma, p.id, start);
+      if (!contract) break;
+      const cap = contract.effectiveTo && contract.effectiveTo < today ? contract.effectiveTo : addDays(today, -1);
+      let end = periodEndFor(start, contract.settlementFrequency);
+      if (end > cap) break;
+      while (!(await periodHasData(p.id, start, end))) {
+        const next = periodEndFor(addDays(end, 1), contract.settlementFrequency);
+        if (next > cap) { end = cap; break; }
+        end = next;
+      }
+      if (!(await periodHasData(p.id, start, end))) break;
+      try {
+        const s = await createSettlement(actor, { partnerId: p.id, periodStart: start, periodEnd: end });
+        result.created++;
+        if (opts.submit) {
+          try { await submitSettlement(actor, s.id); result.submitted++; } catch (e) { result.skipped.push(`${p.businessName} ${s.number}: ${(e as Error).message}`); break; }
+        }
+      } catch (e) {
+        result.skipped.push(`${p.businessName}: ${(e as Error).message}`);
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+/** Finalizes every settlement pending approval that this approver did not prepare. */
+export async function finalizePendingSettlements(actor: Actor) {
+  if (!can(actor.role, "settlements:approve")) throw new ForbiddenError();
+  const pending = await prisma.settlement.findMany({ where: { status: "PENDING_APPROVAL", ...(actor.role === "SUPER_ADMIN" ? {} : { NOT: { preparedById: actor.id } }) }, include: { partner: true }, orderBy: { periodEnd: "asc" } });
+  const result = { finalized: 0, failed: [] as string[] };
+  for (const s of pending) {
+    try { await finalizeSettlement(actor, s.id); result.finalized++; } catch (e) { result.failed.push(`${s.number} (${s.partner.businessName}): ${(e as Error).message}`); }
+  }
+  return result;
+}

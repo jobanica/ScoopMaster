@@ -142,6 +142,7 @@ model Partner {
   machineAssignments MachineAssignment[]
   salesReports       SalesReport[]
   productPrices      PartnerProductPrice[]
+  countProducts      PartnerCountProduct[]
   supplyOrders       SupplyOrder[]
   invoices           Invoice[]
   bills              Bill[]
@@ -170,6 +171,11 @@ enum CashCustody {
   OWNER // owner collects sales cash and pays the partner's share (creates a payable)
 }
 
+enum SalesReportingMethod {
+  THEORETICAL // partner reports units sold; ingredient usage is calculated from recipes
+  INVENTORY_COUNT // partner counts stock at closing; units sold and costs are derived from what was used
+}
+
 enum SettlementFrequency {
   DAILY
   WEEKLY
@@ -178,27 +184,28 @@ enum SettlementFrequency {
 }
 
 model PartnerContract {
-  id                      String              @id @default(cuid())
+  id                      String               @id @default(cuid())
   partnerId               String
-  partner                 Partner             @relation(fields: [partnerId], references: [id])
+  partner                 Partner              @relation(fields: [partnerId], references: [id])
   version                 Int
-  effectiveFrom           DateTime            @db.Date
-  effectiveTo             DateTime?           @db.Date
-  shareModel              ShareModel          @default(PROFIT_SHARE)
-  ownerSharePct           Decimal             @default(50) @db.Decimal(5, 2)
-  partnerSharePct         Decimal             @default(50) @db.Decimal(5, 2)
-  fixedFee                Decimal             @default(0) @db.Decimal(14, 2)
-  cogsBasis               CogsBasis           @default(TRANSFER_PRICE)
-  deductOperatingExpenses Boolean             @default(true)
-  shareLosses             Boolean             @default(true)
-  cashCustody             CashCustody         @default(PARTNER)
-  settlementFrequency     SettlementFrequency @default(MONTHLY)
-  paymentTermsDays        Int                 @default(7) // due days for settlement amounts and supply invoices
-  supplyPaymentTermsDays  Int                 @default(15)
+  effectiveFrom           DateTime             @db.Date
+  effectiveTo             DateTime?            @db.Date
+  shareModel              ShareModel           @default(PROFIT_SHARE)
+  ownerSharePct           Decimal              @default(50) @db.Decimal(5, 2)
+  partnerSharePct         Decimal              @default(50) @db.Decimal(5, 2)
+  fixedFee                Decimal              @default(0) @db.Decimal(14, 2)
+  cogsBasis               CogsBasis            @default(TRANSFER_PRICE)
+  deductOperatingExpenses Boolean              @default(true)
+  shareLosses             Boolean              @default(true)
+  cashCustody             CashCustody          @default(PARTNER)
+  settlementFrequency     SettlementFrequency  @default(MONTHLY)
+  reportingMethod         SalesReportingMethod @default(THEORETICAL)
+  paymentTermsDays        Int                  @default(7) // due days for settlement amounts and supply invoices
+  supplyPaymentTermsDays  Int                  @default(15)
   terms                   String? // free-text contract terms
-  isActive                Boolean             @default(true)
+  isActive                Boolean              @default(true)
   createdById             String?
-  createdAt               DateTime            @default(now())
+  createdAt               DateTime             @default(now())
 
   settlements Settlement[]
 
@@ -365,6 +372,7 @@ model InventoryItem {
   invoiceLines      InvoiceLine[]
   countLines        StockCountLine[]
   salesStockLines   SalesReportStock[]
+  countProducts     PartnerCountProduct[]
 
   @@index([category])
 }
@@ -554,6 +562,7 @@ model Product {
   components    ProductComponent[]
   partnerPrices PartnerProductPrice[]
   salesLines    SalesReportLine[]
+  countProducts PartnerCountProduct[]
 }
 
 model ProductComponent {
@@ -564,6 +573,19 @@ model ProductComponent {
   item      InventoryItem @relation(fields: [itemId], references: [id])
   quantity  Decimal       @db.Decimal(14, 4)
   uom       Uom
+}
+
+// INVENTORY_COUNT: which product's price applies to each counted container (e.g. cones → "Vanilla cone 80 g")
+model PartnerCountProduct {
+  id        String        @id @default(cuid())
+  partnerId String
+  partner   Partner       @relation(fields: [partnerId], references: [id])
+  itemId    String
+  item      InventoryItem @relation(fields: [itemId], references: [id])
+  productId String
+  product   Product       @relation(fields: [productId], references: [id])
+
+  @@unique([partnerId, itemId])
 }
 
 model PartnerProductPrice {
@@ -589,46 +611,48 @@ enum SalesReportStatus {
 }
 
 model SalesReport {
-  id               String            @id @default(cuid())
-  number           String            @unique // SR-0000001
-  partnerId        String
-  partner          Partner           @relation(fields: [partnerId], references: [id])
-  machineId        String?
-  machine          Machine?          @relation(fields: [machineId], references: [id])
-  reportDate       DateTime          @db.Date
-  status           SalesReportStatus @default(DRAFT)
-  source           String            @default("MANUAL") // MANUAL, POS, QR …
+  id                String               @id @default(cuid())
+  number            String               @unique // SR-0000001
+  partnerId         String
+  partner           Partner              @relation(fields: [partnerId], references: [id])
+  machineId         String?
+  machine           Machine?             @relation(fields: [machineId], references: [id])
+  reportDate        DateTime             @db.Date
+  status            SalesReportStatus    @default(DRAFT)
+  source            String               @default("MANUAL") // MANUAL, POS, QR …
+  method            SalesReportingMethod @default(THEORETICAL)
+  powderVariancePct Decimal?             @db.Decimal(7, 2) // INVENTORY_COUNT: powder used vs needed for counted sales
   // computed totals (snapshotted at submission)
-  totalUnits       Int               @default(0)
-  grossSales       Decimal           @default(0) @db.Decimal(14, 2)
-  discounts        Decimal           @default(0) @db.Decimal(14, 2)
-  refunds          Decimal           @default(0) @db.Decimal(14, 2)
-  netSales         Decimal           @default(0) @db.Decimal(14, 2)
-  reportedTotal    Decimal           @default(0) @db.Decimal(14, 2) // total the partner declares
-  salesVariance    Decimal           @default(0) @db.Decimal(14, 2) // reportedTotal - netSales
-  cashSales        Decimal           @default(0) @db.Decimal(14, 2)
-  gcashSales       Decimal           @default(0) @db.Decimal(14, 2)
-  otherSales       Decimal           @default(0) @db.Decimal(14, 2)
-  expectedCash     Decimal           @default(0) @db.Decimal(14, 2)
-  actualCash       Decimal           @default(0) @db.Decimal(14, 2)
-  cashVariance     Decimal           @default(0) @db.Decimal(14, 2) // actual - expected (+ overage / - shortage)
-  wastageUnits     Int               @default(0)
-  estimatedCogs    Decimal           @default(0) @db.Decimal(14, 2) // theoretical, at transfer price
-  estimatedProfit  Decimal           @default(0) @db.Decimal(14, 2)
-  hasDiscrepancy   Boolean           @default(false)
-  discrepancyNotes String?
-  notes            String?
-  reviewNotes      String?
-  submittedAt      DateTime?
-  submittedById    String?
-  reviewedAt       DateTime?
-  reviewedById     String?
-  settlementId     String?
-  settlement       Settlement?       @relation(fields: [settlementId], references: [id])
-  revision         Int               @default(0)
-  createdById      String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  totalUnits        Int                  @default(0)
+  grossSales        Decimal              @default(0) @db.Decimal(14, 2)
+  discounts         Decimal              @default(0) @db.Decimal(14, 2)
+  refunds           Decimal              @default(0) @db.Decimal(14, 2)
+  netSales          Decimal              @default(0) @db.Decimal(14, 2)
+  reportedTotal     Decimal              @default(0) @db.Decimal(14, 2) // total the partner declares
+  salesVariance     Decimal              @default(0) @db.Decimal(14, 2) // reportedTotal - netSales
+  cashSales         Decimal              @default(0) @db.Decimal(14, 2)
+  gcashSales        Decimal              @default(0) @db.Decimal(14, 2)
+  otherSales        Decimal              @default(0) @db.Decimal(14, 2)
+  expectedCash      Decimal              @default(0) @db.Decimal(14, 2)
+  actualCash        Decimal              @default(0) @db.Decimal(14, 2)
+  cashVariance      Decimal              @default(0) @db.Decimal(14, 2) // actual - expected (+ overage / - shortage)
+  wastageUnits      Int                  @default(0)
+  estimatedCogs     Decimal              @default(0) @db.Decimal(14, 2) // theoretical, at transfer price
+  estimatedProfit   Decimal              @default(0) @db.Decimal(14, 2)
+  hasDiscrepancy    Boolean              @default(false)
+  discrepancyNotes  String?
+  notes             String?
+  reviewNotes       String?
+  submittedAt       DateTime?
+  submittedById     String?
+  reviewedAt        DateTime?
+  reviewedById      String?
+  settlementId      String?
+  settlement        Settlement?          @relation(fields: [settlementId], references: [id])
+  revision          Int                  @default(0)
+  createdById       String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
   lines        SalesReportLine[]
   stockLines   SalesReportStock[]
@@ -655,14 +679,18 @@ model SalesReportLine {
 }
 
 model SalesReportStock {
-  id       String        @id @default(cuid())
-  reportId String
-  report   SalesReport   @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  itemId   String
-  item     InventoryItem @relation(fields: [itemId], references: [id])
-  opening  Decimal       @db.Decimal(14, 4)
-  received Decimal       @default(0) @db.Decimal(14, 4)
-  closing  Decimal       @db.Decimal(14, 4)
+  id        String        @id @default(cuid())
+  reportId  String
+  report    SalesReport   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  itemId    String
+  item      InventoryItem @relation(fields: [itemId], references: [id])
+  opening   Decimal       @db.Decimal(14, 4)
+  received  Decimal       @default(0) @db.Decimal(14, 4)
+  closing   Decimal       @db.Decimal(14, 4)
+  wasted    Decimal       @default(0) @db.Decimal(14, 4) // broken / spilled (cost, not a sale)
+  used      Decimal       @default(0) @db.Decimal(14, 4) // expected on hand − closing count
+  unitValue Decimal       @default(0) @db.Decimal(14, 4) // cost per unit at the contract basis
+  counted   Boolean       @default(true) // false = not counted; usage estimated from units sold
 
   @@unique([reportId, itemId])
 }

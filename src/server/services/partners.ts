@@ -31,6 +31,7 @@ export type ContractInput = {
   shareLosses: boolean;
   cashCustody: "PARTNER" | "OWNER";
   settlementFrequency: "DAILY" | "WEEKLY" | "SEMI_MONTHLY" | "MONTHLY";
+  reportingMethod?: "THEORETICAL" | "INVENTORY_COUNT";
   paymentTermsDays: number;
   supplyPaymentTermsDays: number;
   terms?: string | null;
@@ -110,7 +111,7 @@ export async function createContract(actor: Actor, partnerId: string, input: Con
         partnerId, version: (last._max.version ?? 0) + 1, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null,
         shareModel: input.shareModel, ownerSharePct: pct.toString(), partnerSharePct: D(100).minus(pct).toString(), fixedFee: money(input.fixedFee).toString(),
         cogsBasis: input.cogsBasis, deductOperatingExpenses: input.deductOperatingExpenses, shareLosses: input.shareLosses, cashCustody: input.cashCustody,
-        settlementFrequency: input.settlementFrequency, paymentTermsDays: input.paymentTermsDays, supplyPaymentTermsDays: input.supplyPaymentTermsDays,
+        settlementFrequency: input.settlementFrequency, reportingMethod: input.reportingMethod ?? "INVENTORY_COUNT", paymentTermsDays: input.paymentTermsDays, supplyPaymentTermsDays: input.supplyPaymentTermsDays,
         terms: input.terms, createdById: actor.id,
       },
     });

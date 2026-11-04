@@ -65,7 +65,7 @@ describe("end-to-end partnership workflow", () => {
     await expect(changePartnerStatus(admin, partnerId, "ACTIVE", "x")).rejects.toThrow(); // PROSPECT → ACTIVE not allowed directly
     await changePartnerStatus(admin, partnerId, "PENDING_APPROVAL", "docs complete");
     await expect(changePartnerStatus(admin, partnerId, "ACTIVE", "x")).rejects.toThrow(/contract/);
-    await createContract(admin, partnerId, { effectiveFrom: addDays(todayDate(), -30), shareModel: "PROFIT_SHARE", ownerSharePct: "50", fixedFee: "0", cogsBasis: "TRANSFER_PRICE", deductOperatingExpenses: true, shareLosses: true, cashCustody: "PARTNER", settlementFrequency: "MONTHLY", paymentTermsDays: 7, supplyPaymentTermsDays: 15 });
+    await createContract(admin, partnerId, { effectiveFrom: addDays(todayDate(), -30), shareModel: "PROFIT_SHARE", ownerSharePct: "50", fixedFee: "0", cogsBasis: "TRANSFER_PRICE", deductOperatingExpenses: true, shareLosses: true, cashCustody: "PARTNER", settlementFrequency: "MONTHLY", reportingMethod: "THEORETICAL", paymentTermsDays: 7, supplyPaymentTermsDays: 15 });
     await changePartnerStatus(admin, partnerId, "ACTIVE", "approved");
     await setProductPrice(admin, partnerId, cupProductId, "40"); // partner-specific price
     const m = await createMachine(admin, { brand: "Generic", model: "SS-2", nozzles: 3, serialNumber: "SN-001", purchasePrice: "85000", condition: "NEW" });

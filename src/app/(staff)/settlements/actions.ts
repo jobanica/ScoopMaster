@@ -2,7 +2,7 @@
 import { requireUser } from "@/lib/auth";
 import { safeAction } from "@/lib/action";
 import { date, optStr, str } from "@/lib/form";
-import { createSettlement, finalizeSettlement, recalculateSettlement, returnSettlementToDraft, submitSettlement, voidSettlement } from "@/server/services/settlements";
+import { createDueSettlements, finalizePendingSettlements, createSettlement, finalizeSettlement, recalculateSettlement, returnSettlementToDraft, submitSettlement, voidSettlement } from "@/server/services/settlements";
 
 export const createSettlementAction = safeAction(async (fd) => {
   const user = await requireUser("settlements:prepare");
@@ -38,4 +38,14 @@ export const voidAction = safeAction(async (fd) => {
   const id = str(fd, "id");
   await voidSettlement(user, id, str(fd, "reason", "Reason"));
   return { revalidate: [`/settlements/${id}`], message: "Settlement voided." };
+});
+export const createDueAction = safeAction(async () => {
+  const user = await requireUser("settlements:prepare");
+  const r = await createDueSettlements(user, { submit: true });
+  return { revalidate: ["/settlements"], message: `${r.created} settlement(s) created, ${r.submitted} submitted for approval.${r.skipped.length ? ` ${r.skipped.length} need attention: ${r.skipped.slice(0, 3).join(" | ")}` : ""}` };
+});
+export const finalizePendingAction = safeAction(async () => {
+  const user = await requireUser("settlements:approve");
+  const r = await finalizePendingSettlements(user);
+  return { revalidate: ["/settlements"], message: `${r.finalized} settlement(s) finalized.${r.failed.length ? ` ${r.failed.length} failed: ${r.failed.slice(0, 3).join(" | ")}` : ""}` };
 });

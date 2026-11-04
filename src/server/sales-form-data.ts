@@ -3,7 +3,7 @@ import { fmtDate, todayDate, addDays } from "@/lib/dates";
 import { UOM_LABEL } from "@/lib/units";
 import { optStr, amount, date } from "@/lib/form";
 import { AppError } from "@/lib/errors";
-import { partnerPricing, type SalesReportInput } from "./services/sales";
+import { countFormData, partnerPricing, type CountReportInput, type SalesReportInput } from "./services/sales";
 import { contractOn } from "./services/partners";
 
 /** Loads everything the sales form needs for a partner (optionally prefilled from an existing editable report). */
@@ -64,3 +64,43 @@ export function parseSalesForm(fd: FormData, partnerId: string): SalesReportInpu
 }
 
 export const intentSubmit = (fd: FormData) => String(fd.get("intent") ?? "draft") === "submit";
+
+/** Data for the closing-count form (INVENTORY_COUNT partners). */
+export async function countFormProps(partnerId: string, date: Date) {
+  const data = await countFormData(prisma, partnerId, date);
+  const report = await prisma.salesReport.findFirst({ where: { partnerId, reportDate: date }, include: { stockLines: true } });
+  const driverOf = new Map(data.drivers.filter((d) => d.product).map((d) => [d.item.id, d.product!]));
+  return {
+    report,
+    reportingMethod: data.contract?.reportingMethod ?? "THEORETICAL",
+    ownerPct: data.contract?.ownerSharePct.toString() ?? "50",
+    needsMapping: data.drivers.filter((d) => !d.product && d.candidates.length > 1).map((d) => d.item.name),
+    rows: data.rows.map((r) => {
+      const prod = driverOf.get(r.item.id);
+      return { itemId: r.item.id, name: r.item.name, uom: UOM_LABEL[r.item.uom], expected: r.expected.toString(), unitValue: r.unitValue.toString(), isContainer: r.isContainer, required: r.required, productId: prod?.id, productName: prod?.name, price: prod ? (data.pricing.find((p) => p.product.id === prod.id)?.price ?? prod.defaultPrice).toString() : undefined };
+    }),
+    consumption: Object.fromEntries(data.pricing.map((p) => [p.product.id, Object.fromEntries([...p.consumption.entries()].map(([k, v]) => [k, v.toString()]))])),
+    initial: {
+      closing: Object.fromEntries((report?.stockLines ?? []).filter((s) => s.counted).map((s) => [s.itemId, s.closing.toString()])),
+      wasted: Object.fromEntries((report?.stockLines ?? []).filter((s) => Number(s.wasted) > 0).map((s) => [s.itemId, s.wasted.toString()])),
+      cashSales: report ? report.cashSales.toString() : "", gcashSales: report ? report.gcashSales.toString() : "", otherSales: report ? report.otherSales.toString() : "",
+      actualCash: report ? report.actualCash.toString() : "", discounts: report ? report.discounts.toString() : "", refunds: report ? report.refunds.toString() : "", notes: report?.notes ?? "",
+    },
+  };
+}
+
+export function parseCountForm(fd: FormData, partnerId: string): CountReportInput {
+  const num = (k: string, label: string) => (optStr(fd, k) ? amount(fd, k, label) : null);
+  return {
+    partnerId,
+    reportDate: date(fd, "reportDate", "Reporting date"),
+    counts: fd.getAll("countItemId").map(String).map((id) => ({ itemId: id, closing: num(`closing_${id}`, "Count"), wasted: num(`wasted_${id}`, "Wasted") })),
+    discounts: amount(fd, "discounts", "Discounts", { optional: true }),
+    refunds: amount(fd, "refunds", "Refunds", { optional: true }),
+    cashSales: amount(fd, "cashSales", "Cash", { optional: true }),
+    gcashSales: amount(fd, "gcashSales", "GCash", { optional: true }),
+    otherSales: amount(fd, "otherSales", "Other payments", { optional: true }),
+    actualCash: optStr(fd, "actualCash") ? amount(fd, "actualCash", "Cash counted") : null,
+    notes: optStr(fd, "notes"),
+  };
+}

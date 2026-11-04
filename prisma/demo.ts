@@ -71,7 +71,7 @@ async function main() {
     n++;
     const p = await createPartner(admin, { businessName: def.businessName, ownerName: def.ownerName, area: def.area, contactNumber: `0917 555 000${n}`, address: `${n} Demo St., ${def.area}`, startDate: lastMonthStart });
     await changePartnerStatus(admin, p.id, "PENDING_APPROVAL", "Documents received");
-    await createContract(admin, p.id, { effectiveFrom: lastMonthStart, shareModel: "PROFIT_SHARE", ownerSharePct: def.pct, fixedFee: "0", cogsBasis: "TRANSFER_PRICE", deductOperatingExpenses: true, shareLosses: true, cashCustody: def.custody, settlementFrequency: "MONTHLY", paymentTermsDays: 7, supplyPaymentTermsDays: 15, terms: "Demo agreement." });
+    await createContract(admin, p.id, { effectiveFrom: lastMonthStart, shareModel: "PROFIT_SHARE", ownerSharePct: def.pct, fixedFee: "0", cogsBasis: "TRANSFER_PRICE", deductOperatingExpenses: true, shareLosses: true, cashCustody: def.custody, settlementFrequency: "MONTHLY", reportingMethod: "THEORETICAL", paymentTermsDays: 7, supplyPaymentTermsDays: 15, terms: "Demo agreement." });
     await changePartnerStatus(admin, p.id, "ACTIVE", "Approved");
     if (n === 2) await setProductPrice(admin, p.id, products[1].id, "28");
     const m = await createMachine(admin, { brand: "FrostLine", model: n === 3 ? "FL-1 Single" : "FL-3 Twin Twist", machineType: "Countertop", nozzles: n === 3 ? 1 : 3, serialNumber: `FL-DEMO-${1000 + n}`, purchaseDate: addDays(lastMonthStart, -30), purchasePrice: n === 3 ? "65000" : "95000", warrantyExpiry: addDays(today, 300), condition: "NEW", nextMaintenanceDate: addDays(today, 5 * n) });

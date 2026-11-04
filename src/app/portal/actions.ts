@@ -5,11 +5,11 @@ import { amount, date, oneOf, optStr, str } from "@/lib/form";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { storeUpload } from "@/lib/storage";
-import { saveSalesReport, requestSalesEdit } from "@/server/services/sales";
+import { saveSalesReport, requestSalesEdit, saveCountReport } from "@/server/services/sales";
 import { cancelSupplyOrder, confirmSupplyReceipt, createSupplyRequest } from "@/server/services/supply";
 import { submitPartnerExpense, submitPartnerPayment } from "@/server/services/finance";
 import { reportMachineProblem } from "@/server/services/machines";
-import { intentSubmit, parseSalesForm } from "@/server/sales-form-data";
+import { intentSubmit, parseCountForm, parseSalesForm } from "@/server/sales-form-data";
 import { parseSupplyLines, qtyMap } from "@/server/supply-form";
 
 // Every action derives the partner from the session — a partnerId from the browser is never trusted.
@@ -17,6 +17,11 @@ import { parseSupplyLines, qtyMap } from "@/server/supply-form";
 export const partnerSaveSalesAction = safeAction(async (fd) => {
   const user = await requirePartnerAction();
   const r = await saveSalesReport(user, parseSalesForm(fd, user.partnerId), { submit: intentSubmit(fd) });
+  return `/portal/sales/${r.id}`;
+});
+export const partnerSaveCountAction = safeAction(async (fd) => {
+  const user = await requirePartnerAction();
+  const r = await saveCountReport(user, parseCountForm(fd, user.partnerId), { submit: intentSubmit(fd) });
   return `/portal/sales/${r.id}`;
 });
 export const partnerEditRequestAction = safeAction(async (fd) => {

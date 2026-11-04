@@ -2,13 +2,18 @@
 import { requireUser } from "@/lib/auth";
 import { safeAction } from "@/lib/action";
 import { optStr, str } from "@/lib/form";
-import { approveCleanReports, approveSalesReport, rejectSalesReport, reopenSalesReport, reviewSalesEdit, saveSalesReport } from "@/server/services/sales";
-import { intentSubmit, parseSalesForm } from "@/server/sales-form-data";
+import { approveCleanReports, approveSalesReport, rejectSalesReport, reopenSalesReport, reviewSalesEdit, saveCountReport, saveSalesReport } from "@/server/services/sales";
+import { intentSubmit, parseCountForm, parseSalesForm } from "@/server/sales-form-data";
 
 export const staffSaveSalesAction = safeAction(async (fd) => {
   const user = await requireUser("sales:write");
   const submit = intentSubmit(fd);
   const r = await saveSalesReport(user, { ...parseSalesForm(fd, str(fd, "partnerId", "Partner")), source: "MANUAL" }, { submit });
+  return `/sales/${r.id}`;
+});
+export const staffSaveCountAction = safeAction(async (fd) => {
+  const user = await requireUser("sales:write");
+  const r = await saveCountReport(user, parseCountForm(fd, str(fd, "partnerId", "Partner")), { submit: intentSubmit(fd) });
   return `/sales/${r.id}`;
 });
 export const approveSalesAction = safeAction(async (fd) => {

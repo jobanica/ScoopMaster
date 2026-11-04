@@ -49,7 +49,7 @@ export function SalesReportForm({ action, products, machines, items, initial, pa
         {machines.length === 1 && <div><span className="label">Machine</span><p className="py-2 text-sm font-semibold">{machines[0].code}</p><input type="hidden" name="machineId" value={machines[0].id} /></div>}
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="card table-wrap">
         <table className="tbl">
           <thead><tr><th>Product</th><th className="num">Price</th><th className="num">Qty sold</th><th className="num">Wastage</th><th className="num">Total</th></tr></thead>
           <tbody>

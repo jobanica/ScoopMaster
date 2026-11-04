@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { AppError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { D, money, qty, Decimal } from "@/lib/money";
 import { computeSales } from "@/lib/calc/sales";
+import { computeCountReport, type CountItem } from "@/lib/calc/count";
 import { consumptionPerUnit } from "@/lib/calc/recipe";
 import { addDays, fmtDate, manilaDayStart, todayDate } from "@/lib/dates";
 import type { Actor } from "../actor";
@@ -88,6 +89,7 @@ export async function saveSalesReport(actor: Actor, input: SalesReportInput, opt
     }
 
     const contract = await contractOn(tx, partnerId, input.reportDate);
+    if (contract?.reportingMethod === "INVENTORY_COUNT") throw new AppError("This partner reports sales by closing inventory count. Use the closing count form.");
     const pricing = await partnerPricing(tx, partnerId, contract?.cogsBasis ?? "TRANSFER_PRICE");
     const byProduct = new Map(pricing.map((p) => [p.product.id, p]));
     const lines = input.lines
@@ -160,6 +162,12 @@ async function approveInTx(tx: Tx, actor: Actor, id: string, notes?: string | nu
   if (!r) throw new NotFoundError("Sales report");
   if (r.status !== "SUBMITTED") throw new AppError(`Only submitted reports can be approved (${r.number} is ${r.status.toLowerCase()}).`);
   await assertPeriodOpen(tx, r.partnerId, r.reportDate);
+  if (r.method === "INVENTORY_COUNT") {
+    // Actual usage was already posted from the closing count at submission.
+    const after = await tx.salesReport.update({ where: { id }, data: { status: "APPROVED", reviewedAt: new Date(), reviewedById: actor.id, reviewNotes: notes ?? r.reviewNotes } });
+    await audit(tx, { userId: actor.id, action: "SALES_APPROVE", entityType: "SalesReport", entityId: id, summary: notes ?? undefined });
+    return after;
+  }
   const loc = await ensurePartnerLocation(tx, r.partnerId);
   const pricing = await partnerPricing(tx, r.partnerId);
   const byProduct = new Map(pricing.map((p) => [p.product.id, p]));
@@ -229,7 +237,11 @@ async function reopenInTx(tx: Tx, actor: Actor, id: string, reason: string) {
     if (s && s.status !== "VOIDED" && s.status !== "DRAFT") throw new AppError(`Report is included in settlement ${s.number}. Void that settlement first.`);
   }
   await assertPeriodOpen(tx, r.partnerId, r.reportDate);
-  if (r.status === "APPROVED") {
+  if (r.status === "APPROVED" || r.method === "INVENTORY_COUNT") {
+    if (r.method === "INVENTORY_COUNT") {
+      const later = await tx.salesReport.findFirst({ where: { partnerId: r.partnerId, method: "INVENTORY_COUNT", reportDate: { gt: r.reportDate }, status: { in: ["SUBMITTED", "APPROVED"] } } });
+      if (later) throw new AppError(`A later count (${later.number}, ${fmtDate(later.reportDate)}) is based on this one. Reopen the later report first.`);
+    }
     const mvs = await tx.stockMovement.findMany({ where: { sourceType: "SalesReport", sourceId: r.id, reversedBy: null, type: { in: ["CONSUMPTION", "WASTAGE"] } } });
     for (const mv of mvs) {
       await postMovement(tx, { type: "REVERSAL", itemId: mv.itemId, locationId: mv.locationId, quantity: D(mv.quantity).negated(), unitCost: mv.unitCost, unitPrice: mv.unitPrice, reversesId: mv.id, sourceType: "SalesReport", sourceId: r.id, reason: `Reopened: ${reason}`, userId: actor.id, occurredAt: mv.occurredAt });
@@ -280,4 +292,176 @@ export async function partnersMissingReports(date: Date) {
     include: { salesReports: { where: { reportDate: date, status: { in: ["SUBMITTED", "APPROVED"] } }, select: { id: true } } },
   });
   return partners.filter((p) => p.salesReports.length === 0);
+}
+
+
+// ───────────── INVENTORY_COUNT reporting ─────────────
+
+export const POWDER_TOLERANCE_PCT = 15; // allowed excess powder use over what counted sales explain (wastage, mix left in machine)
+const DRIVER_CATEGORIES = ["CONES", "CUPS"] as const;
+
+/** Which product's price applies to each counted container (cones, cups) for this partner. */
+export async function countDrivers(db: Tx | typeof prisma, partnerId: string) {
+  const [containers, mappings, products] = await Promise.all([
+    db.inventoryItem.findMany({ where: { isActive: true, category: { in: [...DRIVER_CATEGORIES] } }, orderBy: { name: "asc" } }),
+    db.partnerCountProduct.findMany({ where: { partnerId } }),
+    db.product.findMany({ where: { isActive: true }, include: { components: true } }),
+  ]);
+  return containers.map((c) => {
+    const users = products.filter((p) => p.components.some((x) => x.itemId === c.id));
+    const mapped = mappings.find((m) => m.itemId === c.id);
+    const product = mapped ? products.find((p) => p.id === mapped.productId) ?? null : users.length === 1 ? users[0] : null;
+    return { item: c, product, candidates: users, configured: !!mapped };
+  });
+}
+
+export async function setCountProduct(actor: Actor, partnerId: string, itemId: string, productId: string | null) {
+  return withTx(async (tx) => {
+    if (productId) {
+      const prod = await tx.product.findUnique({ where: { id: productId }, include: { components: true } });
+      if (!prod || !prod.components.some((c) => c.itemId === itemId)) throw new AppError("That product does not use this container.");
+      await tx.partnerCountProduct.upsert({ where: { partnerId_itemId: { partnerId, itemId } }, create: { partnerId, itemId, productId }, update: { productId } });
+    } else {
+      await tx.partnerCountProduct.deleteMany({ where: { partnerId, itemId } });
+    }
+    await audit(tx, { userId: actor.id, action: "COUNT_PRODUCT_SET", entityType: "Partner", entityId: partnerId, summary: `${itemId} → ${productId ?? "auto"}` });
+  });
+}
+
+/** Stock the ledger says is on hand at the end of a business date (later movements excluded). */
+async function expectedOnHand(db: Tx | typeof prisma, locationId: string, date: Date) {
+  const cutoff = manilaDayStart(addDays(date, 1));
+  const [levels, later] = await Promise.all([
+    db.stockLevel.findMany({ where: { locationId } }),
+    db.stockMovement.groupBy({ by: ["itemId"], where: { locationId, occurredAt: { gte: cutoff } }, _sum: { quantity: true } }),
+  ]);
+  const map = new Map<string, Decimal>();
+  for (const l of levels) map.set(l.itemId, D(l.quantity));
+  for (const m of later) map.set(m.itemId, (map.get(m.itemId) ?? new Decimal(0)).minus(D(m._sum.quantity)));
+  return map;
+}
+
+/** Everything the closing-count form needs. */
+export async function countFormData(db: Tx | typeof prisma, partnerId: string, date: Date) {
+  const contract = await contractOn(db, partnerId, date);
+  const basis = contract?.cogsBasis ?? "TRANSFER_PRICE";
+  const loc = await db.location.findUnique({ where: { partnerId } });
+  const [onHand, drivers, items, pricing] = await Promise.all([
+    loc ? expectedOnHand(db, loc.id, date) : new Map<string, Decimal>(),
+    countDrivers(db, partnerId),
+    db.inventoryItem.findMany({ where: { isActive: true }, orderBy: [{ category: "asc" }, { name: "asc" }] }),
+    partnerPricing(db, partnerId, basis),
+  ]);
+  const driverIds = new Set(drivers.filter((d) => d.product).map((d) => d.item.id));
+  const usedInProducts = new Set(pricing.flatMap((p) => [...p.consumption.keys()]));
+  const rows = items
+    .filter((i) => driverIds.has(i.id) || i.category === "ICE_CREAM_POWDER" || D(onHand.get(i.id)).gt(0) || usedInProducts.has(i.id))
+    .map((i) => ({
+      item: i,
+      expected: qty(onHand.get(i.id) ?? 0),
+      unitValue: D(basis === "OWNER_COST" ? i.avgCost : i.partnerPrice),
+      isContainer: driverIds.has(i.id),
+      required: driverIds.has(i.id) || i.category === "ICE_CREAM_POWDER",
+    }));
+  return { contract, drivers, rows, pricing };
+}
+
+export type CountReportInput = {
+  partnerId: string;
+  reportDate: Date;
+  counts: { itemId: string; closing: string | null; wasted: string | null }[];
+  discounts: string;
+  refunds: string;
+  cashSales: string;
+  gcashSales: string;
+  otherSales: string;
+  actualCash?: string | null;
+  notes?: string | null;
+};
+
+export async function saveCountReport(actor: Actor, input: CountReportInput, opts: { submit: boolean }) {
+  const partnerId = actor.role === "PARTNER" ? actor.partnerId : input.partnerId;
+  if (!partnerId) throw new ForbiddenError();
+  if (input.reportDate > todayDate()) throw new AppError("Counts cannot be reported for a future date.");
+  return withTx(async (tx) => {
+    const partner = await tx.partner.findUnique({ where: { id: partnerId } });
+    if (!partner) throw new NotFoundError("Partner");
+    if (!["ACTIVE", "ON_HOLD"].includes(partner.status)) throw new AppError("Sales can only be reported for active partners.");
+    await assertPeriodOpen(tx, partnerId, input.reportDate);
+    const data = await countFormData(tx, partnerId, input.reportDate);
+    if (data.contract?.reportingMethod !== "INVENTORY_COUNT") throw new AppError("This partner's contract uses unit-based sales reporting.");
+    const missing = data.drivers.filter((d) => !d.product && d.candidates.length > 1);
+    if (missing.length) throw new AppError(`Scoop Master still needs to set which product ${missing.map((m) => m.item.name).join(", ")} are sold as (Partner → Prices).`);
+
+    const existing = await tx.salesReport.findFirst({ where: { partnerId, reportDate: input.reportDate } });
+    if (existing && !["DRAFT", "REJECTED"].includes(existing.status)) throw new AppError(`A ${existing.status.toLowerCase()} report (${existing.number}) already exists for ${fmtDate(input.reportDate)}. Request a correction instead.`);
+    if (opts.submit) {
+      const later = await tx.salesReport.findFirst({ where: { partnerId, method: "INVENTORY_COUNT", reportDate: { gt: input.reportDate }, status: { in: ["SUBMITTED", "APPROVED"] } } });
+      if (later) throw new AppError(`A count for a later date (${fmtDate(later.reportDate)}) was already submitted. Counts must be submitted in date order.`);
+    }
+    const assignments = await tx.machineAssignment.findMany({ where: { partnerId, startDate: { lte: input.reportDate }, OR: [{ endDate: null }, { endDate: { gte: input.reportDate } }] } });
+    const machineId = assignments.length === 1 ? assignments[0].machineId : null;
+
+    const countBy = new Map(input.counts.map((c) => [c.itemId, c]));
+    const items: CountItem[] = data.rows.map((r) => {
+      const c = countBy.get(r.item.id);
+      const closing = c?.closing ?? null;
+      if (r.required && opts.submit && (closing === null || closing === "")) throw new AppError(`Please count ${r.item.name}.`);
+      return { itemId: r.item.id, name: r.item.name, expected: r.expected, closing: closing === "" ? null : closing, wasted: c?.wasted || 0, unitValue: r.unitValue, isContainer: r.isContainer };
+    });
+    const drivers = data.drivers.filter((d) => d.product).map((d) => ({ containerItemId: d.item.id, productId: d.product!.id, price: data.pricing.find((p) => p.product.id === d.product!.id)?.price ?? d.product!.defaultPrice }));
+    const consumption = new Map(data.pricing.map((p) => [p.product.id, p.consumption]));
+    let count;
+    try {
+      count = computeCountReport(opts.submit ? items : items.map((i) => (i.isContainer && (i.closing === null) ? { ...i, closing: i.expected } : i)), drivers, consumption, { tolerancePct: POWDER_TOLERANCE_PCT });
+    } catch (e) {
+      throw new AppError((e as Error).message);
+    }
+    const tolerance = (await getRule("CASH_DISCREPANCY", tx)).threshold;
+    const c = computeSales({ lines: count.lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })), discounts: input.discounts || 0, refunds: input.refunds || 0, cashSales: input.cashSales || 0, gcashSales: input.gcashSales || 0, otherSales: input.otherSales || 0, actualCash: input.actualCash || null, tolerance });
+    const flagged = count.checks.filter((x) => x.flagged);
+    const discrepancies = [...c.discrepancies, ...flagged.map((x) => `${x.name} used ${x.actualUse.toString()} vs ${x.expectedUse.toString()} needed for the counted sales (${x.variancePct ? `+${x.variancePct.toFixed(0)}%` : "no sales counted"}) — possible unreported sales or excess wastage`)];
+    const powderCheck = count.checks.find((x) => x.variancePct !== null);
+
+    const reportData = {
+      partnerId, machineId, reportDate: input.reportDate, source: "COUNT", method: "INVENTORY_COUNT" as const,
+      totalUnits: count.totalUnits, wastageUnits: count.items.filter((i) => data.rows.find((r) => r.item.id === i.itemId)?.isContainer).reduce((a, i) => a + i.wasted.toNumber(), 0),
+      grossSales: c.grossSales.toString(), discounts: c.discounts.toString(), refunds: c.refunds.toString(), netSales: c.netSales.toString(),
+      reportedTotal: c.netSales.toString(), salesVariance: "0",
+      cashSales: money(input.cashSales || 0).toString(), gcashSales: money(input.gcashSales || 0).toString(), otherSales: money(input.otherSales || 0).toString(),
+      expectedCash: c.expectedCash.toString(), actualCash: c.actualCash.toString(), cashVariance: c.cashVariance.toString(),
+      estimatedCogs: count.cogs.toString(), estimatedProfit: c.netSales.minus(count.cogs).toString(), powderVariancePct: powderCheck?.variancePct?.toFixed(2) ?? null,
+      hasDiscrepancy: discrepancies.length > 0, discrepancyNotes: discrepancies.join("; ") || null, notes: input.notes,
+      status: opts.submit ? ("SUBMITTED" as const) : ("DRAFT" as const), submittedAt: opts.submit ? new Date() : null, submittedById: opts.submit ? actor.id : null,
+    };
+    const lineRows = count.lines.map((l) => ({ productId: l.productId, quantity: l.quantity, wastageQty: 0, unitPrice: l.unitPrice.toString(), unitCost: "0", lineTotal: l.lineTotal.toString() }));
+    const stockRows = data.rows.map((r) => {
+      const ci = count.items.find((i) => i.itemId === r.item.id);
+      const raw = countBy.get(r.item.id);
+      return { itemId: r.item.id, opening: r.expected.toString(), received: "0", closing: (ci?.closing ?? (raw?.closing ? D(raw.closing) : r.expected)).toString(), wasted: (ci?.wasted ?? 0).toString(), used: (ci?.used ?? 0).toString(), unitValue: r.unitValue.toString(), counted: ci ? ci.counted : !!raw?.closing };
+    });
+
+    let report;
+    if (existing) {
+      await tx.salesReportLine.deleteMany({ where: { reportId: existing.id } });
+      await tx.salesReportStock.deleteMany({ where: { reportId: existing.id } });
+      report = await tx.salesReport.update({ where: { id: existing.id }, data: { ...reportData, lines: { create: lineRows }, stockLines: { create: stockRows } } });
+    } else {
+      report = await tx.salesReport.create({ data: { ...reportData, number: await nextCode(tx, "SR", 7), createdById: actor.id, lines: { create: lineRows }, stockLines: { create: stockRows } } });
+    }
+
+    if (opts.submit) {
+      const loc = await ensurePartnerLocation(tx, partnerId);
+      const occurredAt = new Date(manilaDayStart(input.reportDate).getTime() + 20 * 3600000); // closing time
+      for (const i of count.items) {
+        if (i.consumed.gt(0)) await postMovement(tx, { type: "CONSUMPTION", itemId: i.itemId, locationId: loc.id, quantity: i.consumed.negated(), sourceType: "SalesReport", sourceId: report.id, reason: `${report.number} closing count${i.counted ? "" : " (estimated, not counted)"}`, userId: actor.id, occurredAt });
+        if (i.wasted.gt(0)) await postMovement(tx, { type: "WASTAGE", itemId: i.itemId, locationId: loc.id, quantity: i.wasted.negated(), sourceType: "SalesReport", sourceId: report.id, reason: `${report.number} reported wastage`, userId: actor.id, occurredAt });
+      }
+      if (discrepancies.length) {
+        await notify("CASH_DISCREPANCY", { title: `Check ${report.number} – ${partner.businessName}`, body: discrepancies.join("; "), link: `/sales/${report.id}`, severity: "WARNING", dedupeKey: `disc-${report.id}-${report.revision}` }, tx);
+      }
+    }
+    await audit(tx, { userId: actor.id, action: opts.submit ? "SALES_SUBMIT" : existing ? "SALES_UPDATE" : "SALES_CREATE", entityType: "SalesReport", entityId: report.id, before: existing, after: { report, counts: input.counts } });
+    return report;
+  });
 }

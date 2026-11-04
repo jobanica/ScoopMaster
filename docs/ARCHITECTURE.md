@@ -128,6 +128,16 @@ payment-breakdown mismatch; any difference beyond the tolerance flags a discrepa
 are locked; corrections need an approved edit request (which reverses ledger postings and reopens the report).
 **Approval** posts theoretical ingredient consumption and reported wastage to the partner location's ledger.
 
+**Daily sales by closing inventory count** (contract option `INVENTORY_COUNT`, default for new contracts) — for owners who
+cannot watch sales. At closing the partner counts cups, cones and powder left (other items optional). The system knows
+what should be on hand from the ledger (last count + deliveries), so: used = expected − counted; units sold = cones/cups
+used − broken/spilled; sales = units × the partner's price for the product mapped to each container (Partner → Prices);
+cost = cups, cones and powder used (uncounted items estimated from units sold); gross profit = sales − cost, split per
+contract (e.g. 50/50). Actual usage is posted to the ledger at submission. A **powder check** compares powder used with
+what the counted sales need and flags anything more than 15 % over (possible unreported sales). Counts must be submitted
+in date order, and an earlier count can only be reopened after later ones. Daily settlements are created in bulk
+("Create all due settlements") and approved in bulk ("Finalize pending").
+
 **Supply orders** — Request → Approve (quantities adjustable, prices snapshotted) / Reject → Preparing → Dispatch
 (warehouse → In Transit; warehouse stock decreases) → Receipt confirmation by partner or staff (In Transit → partner
 location; shortfalls written off as DAMAGED) → **SUPPLY invoice** generated for received quantities with cost
@@ -175,6 +185,19 @@ theoretical servings = ⌊yield ÷ serving⌋     expected servings = ⌊yield �
 ```
 Theoretical consumption posted per unit sold uses the exact serving (no wastage factor); actual wastage and count
 variances are tracked separately, giving a theoretical-vs-actual yield efficiency per recipe.
+
+### Closing-count reporting
+```
+expected on hand = ledger balance at closing (previous count + deliveries since)
+used             = expected − counted            (counted > expected is rejected)
+units sold       = cones/cups used − wasted       (whole pieces)
+sales            = Σ units sold × partner price of the mapped product
+cost of goods    = Σ used × unit value (contract basis) — uncounted items estimated from units sold
+gross profit     = sales − discounts − refunds − cost of goods      → split per contract
+powder check     = (powder used − powder needed for units sold) ÷ needed  > 15 %  → discrepancy
+```
+The daily settlement uses the same ledger usage, so the settlement's supplies consumed always equals the cost on that
+day's count (verified by `tests/count-workflow.test.ts`).
 
 ### Partnership profit sharing (per contract)
 ```
