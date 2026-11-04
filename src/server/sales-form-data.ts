@@ -72,12 +72,13 @@ export async function countFormProps(partnerId: string, date: Date) {
   const driverOf = new Map(data.drivers.filter((d) => d.product).map((d) => [d.item.id, d.product!]));
   return {
     report,
+    shift: data.shift,
     reportingMethod: data.contract?.reportingMethod ?? "THEORETICAL",
     ownerPct: data.contract?.ownerSharePct.toString() ?? "50",
     needsMapping: data.drivers.filter((d) => !d.product && d.candidates.length > 1).map((d) => d.item.name),
     rows: data.rows.map((r) => {
       const prod = driverOf.get(r.item.id);
-      return { itemId: r.item.id, name: r.item.name, uom: UOM_LABEL[r.item.uom], expected: r.expected.toString(), unitValue: r.unitValue.toString(), isContainer: r.isContainer, required: r.required, productId: prod?.id, productName: prod?.name, price: prod ? (data.pricing.find((p) => p.product.id === prod.id)?.price ?? prod.defaultPrice).toString() : undefined };
+      return { itemId: r.item.id, name: r.item.name, uom: UOM_LABEL[r.item.uom], expected: r.expected.toString(), opening: r.opening.toString(), received: r.received.toString(), unitValue: r.unitValue.toString(), isContainer: r.isContainer, required: r.required, productId: prod?.id, productName: prod?.name, price: prod ? (data.pricing.find((p) => p.product.id === prod.id)?.price ?? prod.defaultPrice).toString() : undefined };
     }),
     consumption: Object.fromEntries(data.pricing.map((p) => [p.product.id, Object.fromEntries([...p.consumption.entries()].map(([k, v]) => [k, v.toString()]))])),
     initial: {

@@ -9,6 +9,7 @@ import { saveSalesReport, requestSalesEdit, saveCountReport } from "@/server/ser
 import { cancelSupplyOrder, confirmSupplyReceipt, createSupplyRequest } from "@/server/services/supply";
 import { submitPartnerExpense, submitPartnerPayment } from "@/server/services/finance";
 import { reportMachineProblem } from "@/server/services/machines";
+import { openShift } from "@/server/services/shifts";
 import { intentSubmit, parseCountForm, parseSalesForm } from "@/server/sales-form-data";
 import { parseSupplyLines, qtyMap } from "@/server/supply-form";
 
@@ -72,4 +73,15 @@ export const partnerProblemAction = safeAction(async (fd) => {
   const user = await requirePartnerAction();
   await reportMachineProblem(user, { machineId: str(fd, "machineId"), description: str(fd, "description", "Description"), type: "PROBLEM_REPORT" });
   return { revalidate: ["/portal/machine"], message: "Problem reported. Our operations team has been notified." };
+});
+
+export const partnerOpenShiftAction = safeAction(async (fd) => {
+  const user = await requirePartnerAction();
+  const counts = fd.getAll("itemId").map(String).map((id) => {
+    const v = optStr(fd, `count_${id}`);
+    if (v !== null && !/^\d+(\.\d+)?$/.test(v.replace(/,/g, ""))) throw new AppError("Counts must be numbers.");
+    return { itemId: id, counted: v === null ? null : v.replace(/,/g, "") };
+  });
+  await openShift(user, { partnerId: user.partnerId, counts, notes: optStr(fd, "notes") });
+  return "/portal?shift=opened";
 });

@@ -69,6 +69,7 @@ Demo logins use password `DemoPass123`: `admin.demo@`, `finance.demo@`, `warehou
 
 | When | Who | Where |
 |---|---|---|
+| Daily (opening) | Partners tap **Open shift** in the portal and confirm the cups, cones and powder carried over from yesterday's closing | Portal → Home; staff monitor Sales → Partner shifts |
 | Daily (closing) | Partners submit their **closing count** of cups, cones and powder in the portal; sales, cost, gross profit and the 50/50 split are calculated automatically | Portal → Sales |
 | Daily | Admin approves clean reports in bulk, reviews discrepancies (cash, powder check) | Sales Reports |
 | Daily | Finance: "Create all due settlements" · Admin: "Finalize pending" | Settlements |

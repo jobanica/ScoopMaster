@@ -42,6 +42,7 @@ export default async function SalesPage({ searchParams }: { searchParams: SP }) 
     <div>
       <PageHeader title="Sales reports" subtitle={`${r.fromText} – ${r.toText}`} actions={<>
         {can(user.role, "sales:review") && pendingClean > 0 && <ConfirmAction action={approveCleanAction} label={`Approve ${pendingClean} clean report(s)`} title="Approve all clean reports?" description="Approves every submitted report with no discrepancy and posts theoretical consumption to partner inventory." variant="success" />}
+        <LinkButton href="/sales/shifts" variant="secondary">Partner shifts</LinkButton>
         {can(user.role, "sales:write") && <LinkButton href="/sales/new">+ Manual entry</LinkButton>}
       </>} />
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">

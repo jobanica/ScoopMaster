@@ -13,6 +13,7 @@ import { ensurePartnerLocation, postMovement } from "./inventory";
 import { assertPeriodOpen } from "./periods";
 import { contractOn } from "./partners";
 import { getRule, notify, notifyPartner } from "./notifications";
+import { INFLOW_TYPES, closeShiftWithReport, openShiftFor, reopenShiftForReport } from "./shifts";
 
 const productInclude = {
   components: { include: { item: true } },
@@ -247,6 +248,7 @@ async function reopenInTx(tx: Tx, actor: Actor, id: string, reason: string) {
       await postMovement(tx, { type: "REVERSAL", itemId: mv.itemId, locationId: mv.locationId, quantity: D(mv.quantity).negated(), unitCost: mv.unitCost, unitPrice: mv.unitPrice, reversesId: mv.id, sourceType: "SalesReport", sourceId: r.id, reason: `Reopened: ${reason}`, userId: actor.id, occurredAt: mv.occurredAt });
     }
   }
+  if (r.method === "INVENTORY_COUNT") await reopenShiftForReport(tx, r.id);
   const after = await tx.salesReport.update({ where: { id }, data: { status: "DRAFT", revision: { increment: 1 }, settlementId: null, reviewNotes: `Reopened: ${reason}` } });
   await audit(tx, { userId: actor.id, action: "SALES_REOPEN", entityType: "SalesReport", entityId: id, summary: reason, before: r, after });
   return after;
@@ -354,16 +356,21 @@ export async function countFormData(db: Tx | typeof prisma, partnerId: string, d
   ]);
   const driverIds = new Set(drivers.filter((d) => d.product).map((d) => d.item.id));
   const usedInProducts = new Set(pricing.flatMap((p) => [...p.consumption.keys()]));
+  // Received during the shift (or the business day if no shift was opened)
+  const shift = await db.shift.findUnique({ where: { partnerId_businessDate: { partnerId, businessDate: date } } });
+  const since = shift && !shift.autoOpened ? shift.openedAt : manilaDayStart(date);
+  const inflows = loc ? await db.stockMovement.groupBy({ by: ["itemId"], where: { locationId: loc.id, type: { in: INFLOW_TYPES }, occurredAt: { gte: since, lt: manilaDayStart(addDays(date, 1)) } }, _sum: { quantity: true } }) : [];
   const rows = items
     .filter((i) => driverIds.has(i.id) || i.category === "ICE_CREAM_POWDER" || D(onHand.get(i.id)).gt(0) || usedInProducts.has(i.id))
     .map((i) => ({
       item: i,
       expected: qty(onHand.get(i.id) ?? 0),
+      received: qty(inflows.find((x) => x.itemId === i.id)?._sum.quantity ?? 0),
       unitValue: D(basis === "OWNER_COST" ? i.avgCost : i.partnerPrice),
       isContainer: driverIds.has(i.id),
       required: driverIds.has(i.id) || i.category === "ICE_CREAM_POWDER",
     }));
-  return { contract, drivers, rows, pricing };
+  return { contract, drivers, rows: rows.map((r) => ({ ...r, opening: r.expected.minus(r.received) })), pricing, shift };
 }
 
 export type CountReportInput = {
@@ -396,6 +403,8 @@ export async function saveCountReport(actor: Actor, input: CountReportInput, opt
     const existing = await tx.salesReport.findFirst({ where: { partnerId, reportDate: input.reportDate } });
     if (existing && !["DRAFT", "REJECTED"].includes(existing.status)) throw new AppError(`A ${existing.status.toLowerCase()} report (${existing.number}) already exists for ${fmtDate(input.reportDate)}. Request a correction instead.`);
     if (opts.submit) {
+      const earlierShift = await openShiftFor(tx, partnerId, input.reportDate);
+      if (earlierShift) throw new AppError(`The shift for ${fmtDate(earlierShift.businessDate)} is still open. Submit its closing count first.`);
       const later = await tx.salesReport.findFirst({ where: { partnerId, method: "INVENTORY_COUNT", reportDate: { gt: input.reportDate }, status: { in: ["SUBMITTED", "APPROVED"] } } });
       if (later) throw new AppError(`A count for a later date (${fmtDate(later.reportDate)}) was already submitted. Counts must be submitted in date order.`);
     }
@@ -438,7 +447,7 @@ export async function saveCountReport(actor: Actor, input: CountReportInput, opt
     const stockRows = data.rows.map((r) => {
       const ci = count.items.find((i) => i.itemId === r.item.id);
       const raw = countBy.get(r.item.id);
-      return { itemId: r.item.id, opening: r.expected.toString(), received: "0", closing: (ci?.closing ?? (raw?.closing ? D(raw.closing) : r.expected)).toString(), wasted: (ci?.wasted ?? 0).toString(), used: (ci?.used ?? 0).toString(), unitValue: r.unitValue.toString(), counted: ci ? ci.counted : !!raw?.closing };
+      return { itemId: r.item.id, opening: r.opening.toString(), received: r.received.toString(), closing: (ci?.closing ?? (raw?.closing ? D(raw.closing) : r.expected)).toString(), wasted: (ci?.wasted ?? 0).toString(), used: (ci?.used ?? 0).toString(), unitValue: r.unitValue.toString(), counted: ci ? ci.counted : !!raw?.closing };
     });
 
     let report;
@@ -451,6 +460,7 @@ export async function saveCountReport(actor: Actor, input: CountReportInput, opt
     }
 
     if (opts.submit) {
+      await closeShiftWithReport(tx, actor, report, data.rows.map((r) => ({ itemId: r.item.id, opening: r.opening })));
       const loc = await ensurePartnerLocation(tx, partnerId);
       const occurredAt = new Date(manilaDayStart(input.reportDate).getTime() + 20 * 3600000); // closing time
       for (const i of count.items) {

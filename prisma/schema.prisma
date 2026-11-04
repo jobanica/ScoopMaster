@@ -143,6 +143,7 @@ model Partner {
   salesReports       SalesReport[]
   productPrices      PartnerProductPrice[]
   countProducts      PartnerCountProduct[]
+  shifts             Shift[]
   supplyOrders       SupplyOrder[]
   invoices           Invoice[]
   bills              Bill[]
@@ -373,6 +374,7 @@ model InventoryItem {
   countLines        StockCountLine[]
   salesStockLines   SalesReportStock[]
   countProducts     PartnerCountProduct[]
+  shiftLines        ShiftLine[]
 
   @@index([category])
 }
@@ -657,6 +659,7 @@ model SalesReport {
   lines        SalesReportLine[]
   stockLines   SalesReportStock[]
   editRequests SalesEditRequest[]
+  shift        Shift?
 
   @@unique([partnerId, machineId, reportDate])
   @@index([reportDate])
@@ -712,6 +715,53 @@ model SalesEditRequest {
   reviewedAt    DateTime?
   reviewNotes   String?
   createdAt     DateTime          @default(now())
+}
+
+// ───────────────────────────── Partner shifts ─────────────────────────────
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+// One shift per partner per business day. Opening carries over the previous closing count (+ deliveries since);
+// the closing count (SalesReport) closes it.
+model Shift {
+  id             String       @id @default(cuid())
+  number         String       @unique // SH-0000001
+  partnerId      String
+  partner        Partner      @relation(fields: [partnerId], references: [id])
+  businessDate   DateTime     @db.Date
+  status         ShiftStatus  @default(OPEN)
+  openedAt       DateTime     @default(now())
+  openedById     String?
+  autoOpened     Boolean      @default(false) // created at closing because the partner did not open the shift
+  closedAt       DateTime?
+  reportId       String?      @unique
+  report         SalesReport? @relation(fields: [reportId], references: [id])
+  hasDiscrepancy Boolean      @default(false)
+  notes          String?
+  createdAt      DateTime     @default(now())
+
+  lines ShiftLine[]
+
+  @@unique([partnerId, businessDate])
+  @@index([businessDate, status])
+}
+
+model ShiftLine {
+  id            String        @id @default(cuid())
+  shiftId       String
+  shift         Shift         @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  itemId        String
+  item          InventoryItem @relation(fields: [itemId], references: [id])
+  lastClosing   Decimal?      @db.Decimal(14, 4) // previous closing count (null on the first shift)
+  receivedSince Decimal       @default(0) @db.Decimal(14, 4) // deliveries between the previous closing and opening
+  carriedOver   Decimal       @db.Decimal(14, 4) // opening stock per records
+  counted       Decimal?      @db.Decimal(14, 4) // partner's opening count when it differs
+  variance      Decimal       @default(0) @db.Decimal(14, 4) // counted − carriedOver (posted as COUNT_VARIANCE)
+
+  @@unique([shiftId, itemId])
 }
 
 // ───────────────────────────── Supply orders ─────────────────────────────
@@ -1078,6 +1128,7 @@ enum NotificationType {
   CONTRACT_EXPIRING
   SALES_SUBMITTED
   EDIT_REQUEST
+  SHIFT_VARIANCE
   GENERAL
 }
 

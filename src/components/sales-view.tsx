@@ -10,7 +10,7 @@ export async function loadSalesReport(id: string) {
     where: { id },
     include: {
       partner: true, machine: true, settlement: { select: { id: true, number: true, status: true } },
-      lines: { include: { product: true } }, stockLines: { include: { item: true } },
+      lines: { include: { product: true } }, stockLines: { include: { item: true } }, shift: true,
       editRequests: { orderBy: { createdAt: "desc" } },
     },
   });
@@ -31,7 +31,7 @@ export function SalesReportView({ r, showCost, audience = "staff" }: { r: Loaded
         <Card title="Report" className="lg:col-span-2">
           <DL cols={3} items={[
             ["Partner", r.partner.businessName], ["Machine", r.machine?.code], ["Reporting date", fmtDate(r.reportDate)],
-            ["Status", <span key="s"><StatusBadge status={r.status} /> {r.settlement && <Badge tone="sky">in {r.settlement.number}</Badge>}</span>], ["Reported by", isCount ? "Closing inventory count" : "Units sold"], ["Revision", r.revision],
+            ["Status", <span key="s"><StatusBadge status={r.status} /> {r.settlement && <Badge tone="sky">in {r.settlement.number}</Badge>}</span>], ["Reported by", isCount ? "Closing inventory count" : "Units sold"], ...(r.shift ? [["Shift", `${r.shift.number} · opened ${r.shift.autoOpened ? "— (not opened)" : fmtDateTime(r.shift.openedAt)} · closed ${fmtDateTime(r.shift.closedAt)}`] as [string, string]] : []), ["Revision", r.revision],
             ["Submitted", fmtDateTime(r.submittedAt)], ["Reviewed", fmtDateTime(r.reviewedAt)], ["Notes", r.notes],
           ]} />
         </Card>
@@ -62,9 +62,9 @@ export function SalesReportView({ r, showCost, audience = "staff" }: { r: Loaded
       {isCount && (
         <Card title="Closing count" pad={false}>
           <div className="table-wrap"><table className="tbl">
-            <thead><tr><th>Item</th><th className="num">Should have</th><th className="num">Counted</th><th className="num">Wasted</th><th className="num">Used</th><th className="num">Cost</th></tr></thead>
+            <thead><tr><th>Item</th><th className="num">Opening</th><th className="num">Received</th><th className="num">Should have</th><th className="num">Counted</th><th className="num">Wasted</th><th className="num">Used</th><th className="num">Cost</th></tr></thead>
             <tbody>{r.stockLines.map((s) => (
-              <tr key={s.id}><td>{s.item.name} {!s.counted && <Badge tone="gray">estimated</Badge>}</td><td className="num">{formatQty(s.opening, 3)}</td><td className="num">{s.counted ? formatQty(s.closing, 3) : "—"}</td><td className="num">{formatQty(s.wasted, 3)}</td><td className="num font-semibold">{formatQty(s.used, 3)}</td><td className="num"><Peso v={D(s.used).times(D(s.unitValue))} /></td></tr>
+              <tr key={s.id}><td>{s.item.name} {!s.counted && <Badge tone="gray">estimated</Badge>}</td><td className="num">{formatQty(s.opening, 3)}</td><td className="num">{formatQty(s.received, 3)}</td><td className="num">{formatQty(D(s.opening).plus(D(s.received)), 3)}</td><td className="num">{s.counted ? formatQty(s.closing, 3) : "—"}</td><td className="num">{formatQty(s.wasted, 3)}</td><td className="num font-semibold">{formatQty(s.used, 3)}</td><td className="num"><Peso v={D(s.used).times(D(s.unitValue))} /></td></tr>
             ))}</tbody>
           </table></div>
         </Card>

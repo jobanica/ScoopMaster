@@ -138,6 +138,14 @@ what the counted sales need and flags anything more than 15 % over (possible unr
 in date order, and an earlier count can only be reopened after later ones. Daily settlements are created in bulk
 ("Create all due settlements") and approved in bulk ("Finalize pending").
 
+**Partner shifts** — Each business day the partner taps **Open shift**: the portal shows yesterday's closing count, deliveries
+received since, and what they should have now (carried over). One tap confirms; if something differs (e.g. cones missing
+overnight), the partner enters the actual amount — the difference is posted as an audited `COUNT_VARIANCE` and staff are
+alerted (`SHIFT_VARIANCE`). Deliveries confirmed during the shift are added automatically. Submitting the closing count
+closes the shift (a shift is recorded automatically if the partner forgot to open one); reopening the count reopens the
+shift. A shift left open blocks the next day until its closing count is submitted. Staff see every partner's shift
+status on **Sales → Partner shifts**.
+
 **Supply orders** — Request → Approve (quantities adjustable, prices snapshotted) / Reject → Preparing → Dispatch
 (warehouse → In Transit; warehouse stock decreases) → Receipt confirmation by partner or staff (In Transit → partner
 location; shortfalls written off as DAMAGED) → **SUPPLY invoice** generated for received quantities with cost

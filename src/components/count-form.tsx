@@ -4,7 +4,7 @@ import Decimal from "decimal.js";
 import type { ActionState } from "@/lib/action";
 import { PendingProvider, SubmitButton, useActionSubmit } from "./forms";
 
-export type CountRow = { itemId: string; name: string; uom: string; expected: string; unitValue: string; isContainer: boolean; required: boolean; productId?: string; productName?: string; price?: string };
+export type CountRow = { itemId: string; name: string; uom: string; expected: string; opening: string; received: string; unitValue: string; isContainer: boolean; required: boolean; productId?: string; productName?: string; price?: string };
 type Initial = { closing: Record<string, string>; wasted: Record<string, string>; cashSales: string; gcashSales: string; otherSales: string; actualCash: string; discounts: string; refunds: string; notes: string };
 
 const peso = (d: Decimal) => (d.isNegative() ? "-₱" : "₱") + d.abs().toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -68,7 +68,8 @@ export function CountReportForm({ action, rows, consumption, ownerPct, reportDat
                 <span className="font-medium">{r.name}</span>{r.required && <span className="text-berry-700"> *</span>}
                 <span className="block text-xs text-choco-500">{r.uom}{r.productName ? ` · sold as ${r.productName}` : r.required ? "" : " · optional"}</span>
               </div>
-              <div className="text-sm sm:text-right"><span className="label sm:hidden">Should have</span><span className="tabular-nums text-choco-600">{new Decimal(r.expected).toDecimalPlaces(3).toString()}</span></div>
+              <div className="text-sm sm:text-right"><span className="label sm:hidden">Should have</span><span className="tabular-nums text-choco-600">{new Decimal(r.expected).toDecimalPlaces(3).toString()}</span>
+                <span className="block text-[11px] text-choco-400">opening {new Decimal(r.opening).toDecimalPlaces(3).toString()}{!new Decimal(r.received).isZero() && <> + received {new Decimal(r.received).toDecimalPlaces(3).toString()}</>}</span></div>
               <div className="text-sm sm:text-right"><span className="label sm:hidden">Used</span><span className="tabular-nums font-semibold">{calc.usage[r.itemId] ? calc.usage[r.itemId].toDecimalPlaces(3).toString() : "—"}</span></div>
               <label className="block"><span className="label">Counted left</span><input className="input text-right" name={`closing_${r.itemId}`} inputMode="decimal" value={closing[r.itemId] ?? ""} onChange={(e) => setClosing({ ...closing, [r.itemId]: e.target.value })} placeholder={r.required ? "count" : "skip"} /></label>
               <label className="block"><span className="label">Wasted</span><input className="input text-right" name={`wasted_${r.itemId}`} inputMode="decimal" value={wasted[r.itemId] ?? ""} onChange={(e) => setWasted({ ...wasted, [r.itemId]: e.target.value })} placeholder="0" /></label>

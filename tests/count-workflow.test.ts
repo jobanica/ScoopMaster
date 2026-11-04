@@ -11,6 +11,8 @@ import { createMachine, assignMachine } from "@/server/services/machines";
 import { createSupplyRequest, reviewSupplyOrder, dispatchSupplyOrder, confirmSupplyReceipt } from "@/server/services/supply";
 import { saveCountReport, approveSalesReport, requestSalesEdit, reviewSalesEdit } from "@/server/services/sales";
 import { createDueSettlements, finalizePendingSettlements } from "@/server/services/settlements";
+import { openShift, shiftOpeningData } from "@/server/services/shifts";
+import { reopenSalesReport } from "@/server/services/sales";
 
 let admin: Actor, finance: Actor, partner: Actor;
 let ids: Record<string, string> = {};
@@ -102,5 +104,49 @@ describe("inventory-count reporting workflow", () => {
     expect(D(settlements[0].ownerShare).toFixed(2)).toBe("490.00");
     // empty days before the first count were merged into the first settlement
     expect(settlements[0].periodStart.toISOString().slice(0, 10)).toBe(addDays(today, -5).toISOString().slice(0, 10));
+  });
+
+  it("open shift carries over yesterday's closing; differences are recorded; closing count closes the shift", async () => {
+    // counts submitted without opening a shift were recorded as shifts at closing
+    const auto = await prisma.shift.findMany({ where: { partnerId: partner.partnerId! }, orderBy: { businessDate: "asc" } });
+    expect(auto.map((x) => [x.status, x.autoOpened])).toEqual([["CLOSED", true], ["CLOSED", true]]);
+
+    const opening = await shiftOpeningData(prisma, partner.partnerId!);
+    const cone = opening.rows.find((r) => r.item.id === ids.cone)!;
+    expect(cone.lastClosing!.toString()).toBe("200"); // yesterday's closing count
+    expect(cone.receivedSince.toString()).toBe("0");
+    expect(cone.carriedOver.toString()).toBe("200");
+    expect(opening.rows.find((r) => r.item.id === ids.powder)!.carriedOver.toString()).toBe("1");
+
+    // the partner finds only 198 cones in the morning
+    const shift = await openShift(partner, { partnerId: "ignored", counts: [{ itemId: ids.cone, counted: "198" }, { itemId: ids.cup, counted: null }] });
+    expect(shift.businessDate.toISOString().slice(0, 10)).toBe(today.toISOString().slice(0, 10));
+    expect(await level(ids.cone)).toBe("198");
+    const s1 = await prisma.shift.findUniqueOrThrow({ where: { id: shift.id }, include: { lines: true } });
+    expect(s1.hasDiscrepancy).toBe(true);
+    expect(s1.lines.find((l) => l.itemId === ids.cone)!.variance.toString()).toBe("-2");
+    expect(await prisma.notification.count({ where: { type: "SHIFT_VARIANCE" } })).toBeGreaterThan(0);
+    await expect(openShift(partner, { partnerId: "x", counts: [] })).rejects.toThrow(/already open/);
+
+    // closing: 198 opening → 150 left = 48 cones sold
+    const r = await saveCountReport(partner, { partnerId: "x", reportDate: today, counts: counts({ cone: "150", cup: "85", powder: "0.05", spoon: "85" }), ...money0, cashSales: "1200", gcashSales: "0" }, { submit: true });
+    expect(r.totalUnits).toBe(48);
+    const line = await prisma.salesReportStock.findFirstOrThrow({ where: { reportId: r.id, itemId: ids.cone } });
+    expect(line.opening.toString()).toBe("198");
+    const closed = await prisma.shift.findUniqueOrThrow({ where: { id: shift.id } });
+    expect(closed.status).toBe("CLOSED");
+    expect(closed.reportId).toBe(r.id);
+
+    // reopening the count reopens the shift
+    await reopenSalesReport(admin, r.id, "recount");
+    expect((await prisma.shift.findUniqueOrThrow({ where: { id: shift.id } })).status).toBe("OPEN");
+  });
+
+  it("a shift left open blocks the next one", async () => {
+    const y = await prisma.shift.findFirstOrThrow({ where: { businessDate: day1 } });
+    const t = await prisma.shift.findFirstOrThrow({ where: { businessDate: today } });
+    await prisma.shift.delete({ where: { id: t.id } });
+    await prisma.shift.update({ where: { id: y.id }, data: { status: "OPEN" } });
+    await expect(openShift(partner, { partnerId: "x", counts: [] })).rejects.toThrow(/still open/);
   });
 });
