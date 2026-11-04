@@ -13,7 +13,7 @@ import { countDrivers, partnerPricing } from "@/server/services/sales";
 import { Alert, Badge, Card, DL, Empty, LinkButton, PageHeader, Peso, StatusBadge, Stat, Tabs, humanize } from "@/components/ui";
 import { ActionForm, Checkbox, ConfirmAction, DateField, Field, SelectField, SubmitButton, TextArea } from "@/components/forms";
 import { Attachments } from "@/components/attachments";
-import { changeStatusAction, createContractAction, createPartnerUserAction, setCountProductAction, setPriceAction } from "../actions";
+import { applySuggestedCountProductsAction, changeStatusAction, createContractAction, createPartnerUserAction, setCountProductAction, setPriceAction } from "../actions";
 
 const NEXT_STATUS: Record<PartnerStatus, PartnerStatus[]> = {
   PROSPECT: ["PENDING_APPROVAL", "TERMINATED"],
@@ -207,23 +207,30 @@ async function PricesTab({ partnerId, canEdit }: { partnerId: string; canEdit: b
   if (!pricing.length) return <Empty>No active products. <Link className="link" href="/recipes/products">Create products</Link> first.</Empty>;
   return (
     <div className="space-y-4">
-    <Card title="Closing-count pricing (each cone / cup used counts as one sale of…)" pad={false}>
-      <table className="tbl"><thead><tr><th>Container</th><th>Priced as product</th><th className="num">Price</th>{canEdit && <th>Change</th>}</tr></thead>
+    <Card title="Closing-count pricing (each cone / cup used counts as one sale of…)" pad={false}
+      actions={canEdit && drivers.some((d) => !d.product && d.suggestion) && (
+        <ActionForm action={applySuggestedCountProductsAction} className="inline">
+          <input type="hidden" name="partnerId" value={partnerId} />
+          <SubmitButton className="btn-primary btn-sm">Use suggested matches</SubmitButton>
+        </ActionForm>
+      )}>
+      {drivers.some((d) => !d.product && d.inUse) && <p className="mx-5 mt-4 rounded-lg bg-berry-50 px-3 py-2 text-sm text-berry-700">The partner cannot submit closing counts until every cone and cup they hold is matched to a product below.</p>}
+      <table className="tbl tbl-stack"><thead><tr><th>Container</th><th>Sold as product</th><th className="num">Price</th>{canEdit && <th>Change</th>}</tr></thead>
         <tbody>{drivers.map((d) => (
           <tr key={d.item.id}>
-            <td>{d.item.name}</td>
-            <td>{d.product ? <>{d.product.name} {!d.configured && <Badge tone="sky">auto</Badge>}</> : d.candidates.length > 1 ? <Badge tone="berry">choose a product</Badge> : <span className="text-choco-500">no product uses this item</span>}</td>
-            <td className="num">{d.product ? <Peso v={pricing.find((p) => p.product.id === d.product!.id)?.price ?? d.product.defaultPrice} /> : "—"}</td>
-            {canEdit && <td>{d.candidates.length > 0 && (
+            <td className="stack-title">{d.item.name}{d.inUse && <span className="ml-1 text-xs text-choco-500">(in stock)</span>}</td>
+            <td data-label="Sold as">{d.product ? <>{d.product.name} {!d.configured && <Badge tone="sky">auto</Badge>}</> : d.candidates.length ? <><Badge tone="berry">not set</Badge>{d.suggestion && <span className="ml-1 text-xs text-choco-500">suggested: {d.suggestion.name}</span>}</> : <span className="text-xs text-choco-500">no cone/cup product yet — create one under Recipes &amp; Products</span>}</td>
+            <td data-label="Price" className="num">{d.product ? <Peso v={pricing.find((p) => p.product.id === d.product!.id)?.price ?? d.product.defaultPrice} /> : "—"}</td>
+            {canEdit && <td data-label="">{d.candidates.length > 0 && (
               <ActionForm action={setCountProductAction} className="flex items-center gap-2">
                 <input type="hidden" name="partnerId" value={partnerId} /><input type="hidden" name="itemId" value={d.item.id} />
-                <select className="input w-56" name="productId" defaultValue={d.configured ? d.product?.id : ""}><option value="">Automatic</option>{d.candidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+                <select className="input w-56" name="productId" defaultValue={d.configured ? d.product?.id : d.suggestion?.id ?? ""}><option value="">{d.candidates.length === 1 && !d.configured ? "Automatic" : "Choose…"}</option>{d.candidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
                 <SubmitButton className="btn-secondary btn-sm">Save</SubmitButton>
               </ActionForm>
             )}</td>}
           </tr>
         ))}</tbody></table>
-      <p className="px-5 py-3 text-xs text-choco-500">Used for partners on closing-count reporting. If only one product uses a container it is chosen automatically.</p>
+      <p className="px-5 py-3 text-xs text-choco-500">Used for partners on closing-count reporting: every cone or cup used (minus wasted) is one sale of the chosen product at this partner&apos;s price.</p>
     </Card>
     <Card title="Selling prices for this partner" pad={false}>
       <div className="table-wrap"><table className="tbl">

@@ -76,7 +76,7 @@ export async function countFormProps(partnerId: string, date: Date) {
     shift: data.shift,
     reportingMethod: data.contract?.reportingMethod ?? "THEORETICAL",
     ownerPct: data.contract?.ownerSharePct.toString() ?? "50",
-    needsMapping: data.drivers.filter((d) => !d.product && d.candidates.length > 1).map((d) => d.item.name),
+    needsMapping: data.drivers.filter((d) => !d.product && (d.inUse || d.candidates.length > 1)).map((d) => d.item.name),
     rows: data.rows.map((r) => {
       const prod = driverOf.get(r.item.id);
       return { itemId: r.item.id, name: r.item.name, uom: UOM_LABEL[r.item.uom], expected: r.expected.toString(), opening: r.opening.toString(), received: r.received.toString(), missingAtOpening: missing.find((m) => m.itemId === r.item.id)?.variance.abs().toString(), unitValue: r.unitValue.toString(), isContainer: r.isContainer, required: r.required, productId: prod?.id, productName: prod?.name, price: prod ? (data.pricing.find((p) => p.product.id === prod.id)?.price ?? prod.defaultPrice).toString() : undefined };

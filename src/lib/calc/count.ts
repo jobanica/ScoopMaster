@@ -73,7 +73,8 @@ export function computeCountReport(items: CountItem[], drivers: CountDriver[], c
       used = qty(expected.minus(closing));
       if (used.isNegative()) throw new Error(`${it.name}: counted ${closing} is more than the ${expected} expected on hand. Please recount or contact Scoop Master.`);
       if (wasted.gt(used)) throw new Error(`${it.name}: wasted cannot be more than used.`);
-      if (!it.isContainer) {
+      const definedByProducts = [...consumption.values()].some((m) => m.has(it.itemId));
+      if (!it.isContainer && definedByProducts) {
         const need = qty(theoretical(it.itemId));
         if (need.gt(0) || used.gt(0)) {
           const variancePct = need.gt(0) ? used.minus(need).dividedBy(need).times(100) : null;

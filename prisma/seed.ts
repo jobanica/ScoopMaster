@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { seedCore } from "./seed-core";
 import { passwordProblem } from "../src/lib/password";
+import { repairRejectedCountPostings } from "./repair";
 
 const prisma = new PrismaClient();
 
@@ -20,6 +21,8 @@ async function main() {
   await seedCore(prisma, { adminEmail, adminPassword: adminPassword ?? "" , skipAdmin: !adminPassword });
   console.log(`✔ Core configuration seeded.${adminPassword && !hasAdmin ? ` Super Admin: ${adminEmail}` : ""}`);
   if (!process.env.SEED_ADMIN_PASSWORD && !isProd) console.log("  ⚠ Using the default password — change it immediately after first login.");
+  const repaired = await repairRejectedCountPostings();
+  if (repaired) console.log(`✔ Data repair: ${repaired} closing count(s) fixed.`);
 }
 
 main().finally(() => prisma.$disconnect());

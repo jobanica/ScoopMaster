@@ -3,7 +3,8 @@ import { requireUser } from "@/lib/auth";
 import { safeAction } from "@/lib/action";
 import { amount, bool, date, email, int, oneOf, optDate, optStr, str } from "@/lib/form";
 import { createContract, createPartner, updatePartner, changePartnerStatus, setProductPrice, createUser } from "@/server/services/partners";
-import { setCountProduct } from "@/server/services/sales";
+import { countDrivers, setCountProduct } from "@/server/services/sales";
+import { prisma } from "@/lib/db";
 import type { PartnerStatus } from "@prisma/client";
 
 function partnerInput(fd: FormData) {
@@ -83,4 +84,13 @@ export const setCountProductAction = safeAction(async (fd) => {
   const partnerId = str(fd, "partnerId");
   await setCountProduct(user, partnerId, str(fd, "itemId"), optStr(fd, "productId"));
   return { revalidate: [`/partners/${partnerId}`], message: "Saved." };
+});
+
+export const applySuggestedCountProductsAction = safeAction(async (fd) => {
+  const user = await requireUser("contracts:write");
+  const partnerId = str(fd, "partnerId");
+  const drivers = await countDrivers(prisma, partnerId);
+  let n = 0;
+  for (const d of drivers) if (!d.product && d.suggestion) { await setCountProduct(user, partnerId, d.item.id, d.suggestion.id); n++; }
+  return { revalidate: [`/partners/${partnerId}`], message: `${n} match(es) saved.` };
 });

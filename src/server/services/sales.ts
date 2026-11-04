@@ -221,11 +221,24 @@ export async function rejectSalesReport(actor: Actor, id: string, notes: string)
     const r = await tx.salesReport.findUnique({ where: { id } });
     if (!r) throw new NotFoundError("Sales report");
     if (r.status !== "SUBMITTED") throw new AppError("Only submitted reports can be rejected.");
+    if (r.method === "INVENTORY_COUNT") await undoCountPostings(tx, actor.id, r, `Rejected: ${notes}`);
     const after = await tx.salesReport.update({ where: { id }, data: { status: "REJECTED", reviewNotes: notes, reviewedAt: new Date(), reviewedById: actor.id } });
     await audit(tx, { userId: actor.id, action: "SALES_REJECT", entityType: "SalesReport", entityId: id, summary: notes });
     await notifyPartner(r.partnerId, "GENERAL", { title: `Sales report ${r.number} needs correction`, body: notes, link: `/portal/sales/${r.id}`, severity: "WARNING", dedupeKey: `rej-${r.id}-${r.revision}` }, tx);
     return after;
   });
+}
+
+/** Reverses a closing count's stock postings and reopens its shift (used by reject and reopen). */
+export async function undoCountPostings(tx: Tx, userId: string | null, r: { id: string; partnerId: string; reportDate: Date }, reason: string) {
+  const later = await tx.salesReport.findFirst({ where: { partnerId: r.partnerId, method: "INVENTORY_COUNT", reportDate: { gt: r.reportDate }, status: { in: ["SUBMITTED", "APPROVED"] } } });
+  if (later) throw new AppError(`A later count (${later.number}, ${fmtDate(later.reportDate)}) is based on this one. Handle the later report first.`);
+  const mvs = await tx.stockMovement.findMany({ where: { sourceType: "SalesReport", sourceId: r.id, reversedBy: null, type: { in: ["CONSUMPTION", "WASTAGE"] } } });
+  for (const mv of mvs) {
+    await postMovement(tx, { type: "REVERSAL", itemId: mv.itemId, locationId: mv.locationId, quantity: D(mv.quantity).negated(), unitCost: mv.unitCost, unitPrice: mv.unitPrice, reversesId: mv.id, sourceType: "SalesReport", sourceId: r.id, reason, userId, occurredAt: mv.occurredAt });
+  }
+  await reopenShiftForReport(tx, r.id);
+  return mvs.length;
 }
 
 /** Re-opens a submitted/approved report for editing; reverses its ledger postings. Audited. */
@@ -304,24 +317,41 @@ const DRIVER_CATEGORIES = ["CONES", "CUPS"] as const;
 
 /** Which product's price applies to each counted container (cones, cups) for this partner. */
 export async function countDrivers(db: Tx | typeof prisma, partnerId: string) {
-  const [containers, mappings, products] = await Promise.all([
+  const loc = await db.location.findUnique({ where: { partnerId } });
+  const [containers, mappings, products, levels] = await Promise.all([
     db.inventoryItem.findMany({ where: { isActive: true, category: { in: [...DRIVER_CATEGORIES] } }, orderBy: { name: "asc" } }),
     db.partnerCountProduct.findMany({ where: { partnerId } }),
-    db.product.findMany({ where: { isActive: true }, include: { components: true } }),
+    db.product.findMany({ where: { isActive: true }, include: { components: true }, orderBy: { name: "asc" } }),
+    loc ? db.stockLevel.findMany({ where: { locationId: loc.id } }) : [],
   ]);
   return containers.map((c) => {
     const users = products.filter((p) => p.components.some((x) => x.itemId === c.id));
+    // Products not linked to any cone/cup yet can still be chosen if they are the right type.
+    const sameType = products.filter((p) => p.type === (c.category === "CONES" ? "CONE" : "CUP") && !p.components.some((x) => containers.some((k) => k.id === x.itemId)));
+    const candidates = users.length ? users : sameType;
     const mapped = mappings.find((m) => m.itemId === c.id);
     const product = mapped ? products.find((p) => p.id === mapped.productId) ?? null : users.length === 1 ? users[0] : null;
-    return { item: c, product, candidates: users, configured: !!mapped };
+    const onHand = D(levels.find((l) => l.itemId === c.id)?.quantity);
+    return { item: c, product, candidates, configured: !!mapped, suggestion: product ? null : suggestProduct(c.name, candidates), inUse: onHand.gt(0) };
   });
+}
+
+/** Best name match between a container ("Sugar Cones") and a product ("Sugar Cone") — only a suggestion. */
+function suggestProduct<T extends { name: string }>(itemName: string, products: T[]): T | null {
+  const words = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 1).map((w) => w.replace(/s$/, "")));
+  const iw = words(itemName);
+  const scored = products.map((p) => ({ p, score: [...words(p.name)].filter((w) => iw.has(w)).length })).sort((a, b) => b.score - a.score);
+  if (!scored.length || scored[0].score === 0 || (scored[1] && scored[1].score === scored[0].score)) return null;
+  return scored[0].p;
 }
 
 export async function setCountProduct(actor: Actor, partnerId: string, itemId: string, productId: string | null) {
   return withTx(async (tx) => {
     if (productId) {
       const prod = await tx.product.findUnique({ where: { id: productId }, include: { components: true } });
-      if (!prod || !prod.components.some((c) => c.itemId === itemId)) throw new AppError("That product does not use this container.");
+      const item = await tx.inventoryItem.findUnique({ where: { id: itemId } });
+      const typeMatches = !!item && prod?.type === (item.category === "CONES" ? "CONE" : item.category === "CUPS" ? "CUP" : "");
+      if (!prod || !(prod.components.some((c) => c.itemId === itemId) || typeMatches)) throw new AppError("That product does not use this container.");
       await tx.partnerCountProduct.upsert({ where: { partnerId_itemId: { partnerId, itemId } }, create: { partnerId, itemId, productId }, update: { productId } });
     } else {
       await tx.partnerCountProduct.deleteMany({ where: { partnerId, itemId } });
@@ -397,7 +427,7 @@ export async function saveCountReport(actor: Actor, input: CountReportInput, opt
     await assertPeriodOpen(tx, partnerId, input.reportDate);
     const data = await countFormData(tx, partnerId, input.reportDate);
     if (data.contract?.reportingMethod !== "INVENTORY_COUNT") throw new AppError("This partner's contract uses unit-based sales reporting.");
-    const missing = data.drivers.filter((d) => !d.product && d.candidates.length > 1);
+    const missing = data.drivers.filter((d) => !d.product && (d.inUse || d.candidates.length > 1));
     if (missing.length) throw new AppError(`Scoop Master still needs to set which product ${missing.map((m) => m.item.name).join(", ")} are sold as (Partner → Prices).`);
 
     const existing = await tx.salesReport.findFirst({ where: { partnerId, reportDate: input.reportDate } });

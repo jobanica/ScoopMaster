@@ -71,7 +71,13 @@ export function CountReportForm({ action, rows, consumption, ownerPct, reportDat
               <div className="text-sm sm:text-right"><span className="label sm:hidden">Should have</span><span className="tabular-nums text-choco-600">{new Decimal(r.expected).toDecimalPlaces(3).toString()}</span>
                 <span className="block text-[11px] text-choco-400">opening {new Decimal(r.opening).toDecimalPlaces(3).toString()}{!new Decimal(r.received).isZero() && <> + received {new Decimal(r.received).toDecimalPlaces(3).toString()}</>}</span>
                 {r.missingAtOpening && <span className="block text-[11px] font-semibold text-berry-700">includes {r.missingAtOpening} missing at opening — counted as sold</span>}</div>
-              <div className="text-sm sm:text-right"><span className="label sm:hidden">Used</span><span className="tabular-nums font-semibold">{calc.usage[r.itemId] ? calc.usage[r.itemId].toDecimalPlaces(3).toString() : "—"}</span></div>
+              <div className="text-sm sm:text-right"><span className="label sm:hidden">Used</span><span className="tabular-nums font-semibold">{calc.usage[r.itemId] ? calc.usage[r.itemId].toDecimalPlaces(3).toString() : "—"}</span>
+                {r.isContainer && r.productId && closing[r.itemId] !== undefined && closing[r.itemId] !== "" && (() => {
+                  const sold = (calc.usage[r.itemId] ?? new Decimal(0)).minus(dec(wasted[r.itemId]));
+                  return sold.isNegative()
+                    ? <span className="block text-xs font-semibold text-berry-700">Wasted is more than used</span>
+                    : <span className="mt-0.5 inline-block rounded-full bg-mint-50 px-2 py-0.5 text-xs font-bold text-mint-700">Sold {sold.toString()}</span>;
+                })()}</div>
               <label className="block"><span className="label">Counted left</span><input className="input text-right" name={`closing_${r.itemId}`} inputMode={r.isContainer ? "numeric" : "decimal"} value={closing[r.itemId] ?? ""} onChange={(e) => setClosing({ ...closing, [r.itemId]: e.target.value })} placeholder={r.required ? "count" : "skip"} /></label>
               <label className="block"><span className="label">Wasted</span><input className="input text-right" name={`wasted_${r.itemId}`} inputMode={r.isContainer ? "numeric" : "decimal"} value={wasted[r.itemId] ?? ""} onChange={(e) => setWasted({ ...wasted, [r.itemId]: e.target.value })} placeholder="0" /></label>
             </li>
