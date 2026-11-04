@@ -10,8 +10,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // direct/session connection for migrations (pooled URL is used at runtime)
 }
 
 // ───────────────────────────── Identity & security ─────────────────────────────
@@ -81,6 +82,13 @@ model AuditLog {
 model Counter {
   key   String @id
   value Int    @default(0)
+}
+
+// File bytes when STORAGE_DRIVER=database (serverless hosts without a persistent disk)
+model StoredFile {
+  storedName String   @id
+  data       Bytes
+  createdAt  DateTime @default(now())
 }
 
 model Attachment {
