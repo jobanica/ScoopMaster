@@ -4,6 +4,7 @@ import autoTable from "jspdf-autotable";
 import { D, Decimal } from "@/lib/money";
 import { fmtDateTime } from "@/lib/dates";
 import { formatCell, totalsFor, type Cell, type Column, type ReportResult } from "./reports";
+import { LOGO_ASPECT, LOGO_PNG_DATA_URL } from "@/lib/brand-logo";
 
 function csvEscape(s: string) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -54,15 +55,16 @@ type PdfSection = { heading?: string; columns: { label: string; align?: "left" |
 export function buildPDF(title: string, subtitle: string, sections: PdfSection[], landscape = false): Buffer {
   const doc = new jsPDF({ orientation: landscape ? "landscape" : "portrait", unit: "pt", format: "a4" });
   const w = doc.internal.pageSize.getWidth();
-  doc.setFillColor(82, 51, 37);
-  doc.rect(0, 0, w, 56, "F");
-  doc.setTextColor(255, 248, 236);
-  doc.setFont("helvetica", "bold").setFontSize(15).text("SCOOP MASTER", 36, 26);
-  doc.setFont("helvetica", "normal").setFontSize(8).text("Soft-Serve Ice Cream Business Management System", 36, 40);
+  // Brand header: logo on white, chocolate rule underneath
+  const logoW = 150, logoH = logoW * LOGO_ASPECT;
+  doc.addImage(LOGO_PNG_DATA_URL, "PNG", 36, 14, logoW, logoH);
+  doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(122, 78, 54).text("Soft-Serve Ice Cream Business Management System", w - 36, 30, { align: "right" });
+  doc.setDrawColor(82, 51, 37).setLineWidth(1.5).line(36, 22 + logoH, w - 36, 22 + logoH);
+  const top = 22 + logoH;
   doc.setTextColor(43, 26, 18);
-  doc.setFont("helvetica", "bold").setFontSize(14).text(title, 36, 84);
-  doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(122, 78, 54).text(subtitle, 36, 99);
-  let y = 116;
+  doc.setFont("helvetica", "bold").setFontSize(14).text(title, 36, top + 26);
+  doc.setFont("helvetica", "normal").setFontSize(9).setTextColor(122, 78, 54).text(subtitle, 36, top + 41);
+  let y = top + 58;
   for (const s of sections) {
     if (s.heading) { doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(43, 26, 18).text(s.heading, 36, y + 6); y += 14; }
     if ("rows" in s) {

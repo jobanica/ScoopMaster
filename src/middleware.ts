@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 // Cheap edge check: no session cookie → login. Real validation happens server-side on every request.
-const PUBLIC = ["/login", "/api/cron", "/_next", "/favicon", "/manifest.webmanifest", "/icon-", "/apple-touch-icon"];
+const PUBLIC = ["/login", "/api/cron", "/_next", "/favicon", "/manifest.webmanifest", "/icon-", "/apple-touch-icon", "/brand/"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

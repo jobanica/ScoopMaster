@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  LayoutDashboard, Store, Cog, Receipt, Boxes, ChefHat, Truck, Wallet, HandCoins, Scale, BarChart3, Bell, Users, ShieldCheck, SlidersHorizontal, Menu, X, IceCreamCone,
+  LayoutDashboard, Store, Cog, Receipt, Boxes, ChefHat, Truck, Wallet, HandCoins, Scale, BarChart3, Bell, Users, ShieldCheck, SlidersHorizontal, Menu, X,
 } from "lucide-react";
 
 const ICONS = { LayoutDashboard, Store, Cog, Receipt, Boxes, ChefHat, Truck, Wallet, HandCoins, Scale, BarChart3, Bell, Users, ShieldCheck, SlidersHorizontal };
@@ -39,10 +40,10 @@ export function Sidebar({ items }: { items: NavItem[] }) {
   );
   const brand = (
     <Link href="/dashboard" className="flex items-center gap-2 px-5 py-5">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-cream-200 text-choco-800"><IceCreamCone size={20} /></span>
+      <Image src="/brand/mark.png" alt="" width={236} height={278} className="h-11 w-auto drop-shadow" priority />
       <span>
         <span className="block text-sm font-extrabold tracking-widest text-cream-50">SCOOP MASTER</span>
-        <span className="block text-[10px] text-choco-300">Soft-Serve Business Management</span>
+        <span className="block text-[10px] italic text-vanilla-400">Your Partner in Every Scoop.</span>
       </span>
     </Link>
   );

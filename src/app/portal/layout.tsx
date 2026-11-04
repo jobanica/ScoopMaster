@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Bell, Home, Receipt, Boxes, Truck, Menu, IceCreamCone, LogOut } from "lucide-react";
+import Image from "next/image";
+import { Bell, Home, Receipt, Boxes, Truck, Menu, LogOut } from "lucide-react";
 import { requirePartner } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { logoutAction } from "../login/actions";
@@ -21,7 +22,7 @@ export default async function PortalLayout({ children }: { children: React.React
     <div className="min-h-screen pb-[calc(5rem+env(safe-area-inset-bottom))]">
       <header className="no-print sticky top-0 z-20 flex items-center justify-between bg-choco-800 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] text-cream-50">
         <Link href="/portal" className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cream-200 text-choco-800"><IceCreamCone size={17} /></span>
+          <Image src="/brand/mark.png" alt="" width={236} height={278} className="h-9 w-auto" priority />
           <span><span className="block text-xs font-extrabold tracking-widest">SCOOP MASTER</span><span className="block text-[11px] text-choco-100">{partner.businessName}</span></span>
         </Link>
         <div className="flex items-center gap-1">
