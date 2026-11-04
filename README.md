@@ -114,6 +114,26 @@ voids → physical count → machine ROI.
 
 ## Deployment (production)
 
+### Current setup: Vercel + Supabase
+* **App**: Vercel project `scoopmaster` (region `icn1`, Seoul) → https://scoopmaster.vercel.app
+* **Database**: Supabase project (ap-northeast-2). `DATABASE_URL` uses the transaction pooler (port 6543,
+  `?pgbouncer=true&connection_limit=1`); `DIRECT_URL` uses the session pooler (port 5432) for migrations.
+* **Builds** run `npm run vercel-build` = `prisma generate && prisma migrate deploy && tsx prisma/seed.ts && next build`,
+  so every production deploy applies pending migrations and the idempotent core seed.
+* **Uploads** are stored in Postgres (`STORAGE_DRIVER=database`), since Vercel has no persistent disk.
+* **Supabase Data API** cannot read app data: RLS is enabled on every table and `anon`/`authenticated` grants are revoked
+  (migration `stored_files_and_rls`).
+* **Alerts** run daily at 06:00 Manila via Vercel Cron (`vercel.json`), authenticated with `CRON_SECRET`.
+* **Environment variables** (Vercel → Settings → Environment Variables): `DATABASE_URL`, `DIRECT_URL`, `SESSION_SECRET`,
+  `CRON_SECRET`, `STORAGE_DRIVER`, `SEED_ADMIN_EMAIL`. If you change the Supabase database password, update both URLs
+  and redeploy. `SEED_ADMIN_PASSWORD` is only needed once, to create the first Super Admin.
+* **Redeploy** after pushing changes:
+  ```bash
+  npx vercel deploy --prod
+  ```
+
+### Self-hosted
+
 1. **Database**: managed PostgreSQL (e.g. Supabase, Neon, RDS, DigitalOcean) or self-hosted Postgres 16. Use a
    dedicated user with access only to this database. Enable the provider's automated backups as well.
 2. **Environment variables** (see `.env.example`):
