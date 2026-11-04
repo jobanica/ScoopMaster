@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+html, body { background: #FFF8EC; color: #2B1A12; }
+body { font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
+
+@layer components {
+  .card { @apply rounded-2xl border border-choco-100 bg-white shadow-card; }
+  .input { @apply w-full rounded-lg border border-choco-100 bg-white px-3 py-2 text-sm text-choco-900 placeholder:text-choco-300 focus:border-choco-500 focus:outline-none focus:ring-2 focus:ring-choco-500/20 disabled:bg-cream-100; }
+  .label { @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-choco-600; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply btn bg-choco-700 text-cream-50 hover:bg-choco-800; }
+  .btn-secondary { @apply btn border border-choco-100 bg-white text-choco-800 hover:bg-cream-100; }
+  .btn-danger { @apply btn bg-berry-700 text-white hover:bg-berry-500; }
+  .btn-success { @apply btn bg-mint-700 text-white hover:bg-mint-500; }
+  .btn-sm { @apply px-3 py-1.5 text-xs; }
+  .table-wrap { @apply overflow-x-auto; }
+  .tbl { @apply w-full text-sm; }
+  .tbl th { @apply whitespace-nowrap border-b border-choco-100 bg-cream-100/60 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-choco-600; }
+  .tbl td { @apply border-b border-choco-50 px-3 py-2 align-top; }
+  .tbl tr:hover td { @apply bg-cream-50; }
+  .num { @apply whitespace-nowrap text-right tabular-nums; }
+  .link { @apply font-medium text-choco-700 underline-offset-2 hover:underline; }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+  .card { box-shadow: none; border-color: #ddd; }
+  main { padding: 0 !important; }
+}
