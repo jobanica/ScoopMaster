@@ -660,6 +660,7 @@ model SalesReport {
   stockLines   SalesReportStock[]
   editRequests SalesEditRequest[]
   shift        Shift?
+  payments     Payment[]
 
   @@unique([partnerId, machineId, reportDate])
   @@index([reportDate])
@@ -982,25 +983,27 @@ enum PaymentRecordStatus {
 }
 
 model Payment {
-  id           String              @id @default(cuid())
-  number       String              @unique // RCPT-00001 / PAY-00001
-  direction    PaymentDirection
-  status       PaymentRecordStatus @default(CONFIRMED)
-  paymentDate  DateTime            @db.Date
-  amount       Decimal             @db.Decimal(14, 2)
-  method       PaymentMethod
-  reference    String?
-  partyName    String
-  partnerId    String?
-  partner      Partner?            @relation(fields: [partnerId], references: [id])
-  contactId    String?
-  contact      Contact?            @relation(fields: [contactId], references: [id])
-  notes        String?
-  voidReason   String?
-  createdById  String?
-  verifiedById String?
-  verifiedAt   DateTime?
-  createdAt    DateTime            @default(now())
+  id            String              @id @default(cuid())
+  number        String              @unique // RCPT-00001 / PAY-00001
+  direction     PaymentDirection
+  status        PaymentRecordStatus @default(CONFIRMED)
+  paymentDate   DateTime            @db.Date
+  amount        Decimal             @db.Decimal(14, 2)
+  method        PaymentMethod
+  reference     String?
+  partyName     String
+  partnerId     String?
+  partner       Partner?            @relation(fields: [partnerId], references: [id])
+  contactId     String?
+  contact       Contact?            @relation(fields: [contactId], references: [id])
+  salesReportId String? // daily pay-in for a closing count: owner share first, then supplies used
+  salesReport   SalesReport?        @relation(fields: [salesReportId], references: [id])
+  notes         String?
+  voidReason    String?
+  createdById   String?
+  verifiedById  String?
+  verifiedAt    DateTime?
+  createdAt     DateTime            @default(now())
 
   allocations PaymentAllocation[]
 

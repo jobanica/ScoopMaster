@@ -8,6 +8,8 @@ import { UOM_LABEL } from "@/lib/units";
 import { Alert, Card, Peso, Stat } from "@/components/ui";
 import { contractOn } from "@/server/services/partners";
 import { openShiftFor } from "@/server/services/shifts";
+import { unpaidDays } from "@/server/services/daily-pay";
+import { DailyPayCard } from "@/components/daily-pay-card";
 import { fmtDateTime } from "@/lib/dates";
 import { one, type SP } from "@/lib/params";
 import { BarChartBox } from "@/components/charts";
@@ -34,6 +36,7 @@ export default async function PortalHome({ searchParams }: { searchParams: SP })
     openShiftFor(prisma, pid, today),
   ]);
   const countMode = contract?.reportingMethod === "INVENTORY_COUNT";
+  const toPay = countMode ? (await unpaidDays(pid)).filter((d) => d.status === "DUE").slice(0, 3) : [];
   const opened = one((await searchParams).shift) === "opened";
   const owed = invoices.reduce((a, i) => a.plus(balanceOf(i)), new Decimal(0));
   const overdue = invoices.filter((i) => i.dueDate < today);
@@ -59,6 +62,7 @@ export default async function PortalHome({ searchParams }: { searchParams: SP })
           <p className="text-lg font-bold">Submit today&apos;s sales →</p><p className="text-sm text-choco-100">{todayReport ? "You have a saved draft." : "Takes about a minute."}</p>
         </Link>
       ) : <Alert tone="mint">Today&apos;s report {todayReport.number} is {todayReport.status.toLowerCase()}.</Alert>}
+      {toPay.map((d) => <DailyPayCard key={d.report.id} due={d} audience="partner" />)}
       {overdue.length > 0 && <Alert tone="berry">{overdue.length} invoice(s) are overdue. <Link className="link" href="/portal/invoices">Pay now</Link></Alert>}
       <div className="grid grid-cols-2 gap-3">
         <Stat label="Sales this month" value={formatPHP(mtd._sum.netSales)} hint={`${mtd._sum.totalUnits ?? 0} units`} tone="berry" href="/portal/sales" />

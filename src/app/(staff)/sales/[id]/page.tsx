@@ -8,13 +8,16 @@ import { Card, LinkButton, PageHeader, StatusBadge } from "@/components/ui";
 import { ConfirmAction } from "@/components/forms";
 import { Attachments } from "@/components/attachments";
 import { SalesReportView, loadSalesReport } from "@/components/sales-view";
-import { approveSalesAction, rejectSalesAction, reopenSalesAction, reviewEditAction } from "../actions";
+import { dailyDue } from "@/server/services/daily-pay";
+import { DailyPayCard } from "@/components/daily-pay-card";
+import { settleDayAction, approveSalesAction, rejectSalesAction, reopenSalesAction, reviewEditAction } from "../actions";
 
 export default async function SalesDetail({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePage("sales:read");
   const r = await loadSalesReport((await params).id);
   if (!r) notFound();
   const review = can(user.role, "sales:review");
+  const due = r.method === "INVENTORY_COUNT" && r.status === "APPROVED" ? await dailyDue(r.partnerId, r.id) : null;
   const movements = await prisma.stockMovement.findMany({ where: { sourceType: "SalesReport", sourceId: r.id }, include: { item: true }, orderBy: { createdAt: "asc" } });
   return (
     <div>
@@ -26,6 +29,9 @@ export default async function SalesDetail({ params }: { params: Promise<{ id: st
         {review && ["SUBMITTED", "APPROVED"].includes(r.status) && <ConfirmAction action={reopenSalesAction} label="Reopen" title="Reopen report?" description="Ledger postings are reversed and the report returns to draft. This is recorded in the audit log." hidden={{ id: r.id }} variant="secondary" reasonLabel="Reason" reasonRequired />}
         {can(user.role, "sales:write") && ["DRAFT", "REJECTED"].includes(r.status) && <LinkButton href={`/sales/new?partnerId=${r.partnerId}&reportId=${r.id}`} variant="secondary">Edit</LinkButton>}
       </>} />
+      {due && <div className="mb-4 max-w-xl"><DailyPayCard due={due} audience="staff" />
+        {due.status === "WAITING" && can(user.role, "settlements:approve") && <div className="mt-2"><ConfirmAction action={settleDayAction} label="Settle this day now" title="Settle this day?" description="Submits and finalizes the settlement for this day so the owner's share is invoiced and the partner can pay." hidden={{ id: r.id }} variant="success" /></div>}
+        {due.payments.length > 0 && <p className="mt-2 text-xs text-choco-600">Payments: {due.payments.map((p) => <Link key={p.id} className="link mr-2" href={`/finance/payments/${p.id}`}>{p.number} ({p.status.toLowerCase().replace("_", " ")})</Link>)}</p>}</div>}
       <SalesReportView r={r} showCost />
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card title="Edit requests">

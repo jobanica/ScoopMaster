@@ -131,6 +131,7 @@ export type PaymentInput = {
   partnerId?: string | null;
   contactId?: string | null;
   notes?: string | null;
+  salesReportId?: string | null;
   allocations: AllocationInput[];
 };
 
@@ -198,7 +199,7 @@ export async function recordPayment(actor: Actor, input: PaymentInput, opts: { s
       data: {
         number: await nextCode(tx, input.direction === "IN" ? "RCPT" : "PAY", 5, { yearly: true }), direction: input.direction, status,
         paymentDate: input.paymentDate, amount: amount.toString(), method: input.method, reference: input.reference, partyName: input.partyName,
-        partnerId: input.partnerId ?? null, contactId: input.contactId ?? null, notes: input.notes, createdById: actor.id,
+        partnerId: input.partnerId ?? null, contactId: input.contactId ?? null, notes: input.notes, salesReportId: input.salesReportId ?? null, createdById: actor.id,
         ...(status === "CONFIRMED" ? { verifiedById: actor.id, verifiedAt: new Date() } : {}),
       },
     });
@@ -254,7 +255,10 @@ export async function verifyPayment(actor: Actor, paymentId: string, approve: bo
     if (!p) throw new NotFoundError("Payment");
     if (p.status !== "PENDING_VERIFICATION") throw new AppError("Payment is not awaiting verification.");
     if (approve) {
-      const intended = p.allocations.map((a) => ({ invoiceId: a.invoiceId, billId: a.billId, amount: a.amount }));
+      // Daily pay-ins are re-split at verification against the balances as they are now.
+      const intended = p.salesReportId && p.partnerId
+        ? await dailyAllocations(tx, p.partnerId, p.salesReportId, p.amount)
+        : p.allocations.map((a) => ({ invoiceId: a.invoiceId, billId: a.billId, amount: a.amount }));
       await tx.paymentAllocation.deleteMany({ where: { paymentId } }); // pending intentions are replaced by real allocations
       await tx.payment.update({ where: { id: paymentId }, data: { status: "CONFIRMED", verifiedById: actor.id, verifiedAt: new Date(), notes: notes ? `${p.notes ?? ""}\nVerified: ${notes}`.trim() : p.notes } });
       await applyAllocations(tx, paymentId, p.direction, p.amount, intended, p.partnerId);
@@ -365,4 +369,25 @@ export async function outstandingReceivables(where: { partnerId?: string } = {})
 
 export async function outstandingPayables() {
   return prisma.bill.findMany({ where: { status: { in: ["UNPAID", "PARTIALLY_PAID"] } }, include: { contact: true, partner: true }, orderBy: { dueDate: "asc" } });
+}
+
+/**
+ * How a daily pay-in is applied: the owner's share for that day first (the settlement's PARTNERSHIP_SHARE invoice),
+ * then the partner's supply invoices, oldest first. Anything left stays on the payment as unapplied credit.
+ */
+export async function dailyAllocations(db: Tx | typeof prisma, partnerId: string, reportId: string, amount: DecimalLike) {
+  let left = money(amount);
+  const out: { invoiceId: string; amount: string }[] = [];
+  const report = await db.salesReport.findUnique({ where: { id: reportId }, include: { settlement: { include: { invoice: true } } } });
+  const share = report?.settlement?.status === "FINALIZED" ? report.settlement.invoice : null;
+  const take = (inv: { id: string; amount: DecimalLike; amountPaid: DecimalLike; status: string }) => {
+    if (left.lte(0) || inv.status === "CANCELLED") return;
+    const bal = D(inv.amount).minus(D(inv.amountPaid));
+    const a = bal.lt(left) ? bal : left;
+    if (a.gt(0)) { out.push({ invoiceId: inv.id, amount: money(a).toString() }); left = left.minus(a); }
+  };
+  if (share) take(share);
+  const supplies = await db.invoice.findMany({ where: { partnerId, type: "SUPPLY", status: { in: ["UNPAID", "PARTIALLY_PAID"] } }, orderBy: [{ issueDate: "asc" }, { number: "asc" }] });
+  for (const inv of supplies) take(inv);
+  return out;
 }

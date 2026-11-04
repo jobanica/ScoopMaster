@@ -86,12 +86,15 @@ describe("inventory-count reporting workflow", () => {
   });
 
   it("creates daily settlements in bulk and splits each day's gross profit 50/50", async () => {
-    for (const r of await prisma.salesReport.findMany({ where: { status: "SUBMITTED" } })) await approveSalesReport(admin, r.id);
-    const res = await createDueSettlements(finance, { submit: true });
-    expect(res.created).toBe(2);
-    expect(res.submitted).toBe(2);
-    const fin = await finalizePendingSettlements(admin);
-    expect(fin.finalized).toBe(2);
+    // approving a daily closing count settles that day automatically (oldest first)
+    const reports = await prisma.salesReport.findMany({ where: { status: "SUBMITTED" }, orderBy: { reportDate: "asc" } });
+    const first = await approveSalesReport(admin, reports[0].id);
+    expect(first.autoSettle?.finalized).toBe(1);
+    await approveSalesReport(admin, reports[1].id);
+    expect(await prisma.settlement.count({ where: { status: "FINALIZED" } })).toBe(2);
+    // the bulk tools find nothing left to do
+    expect((await createDueSettlements(finance, { submit: true })).created).toBe(0);
+    expect((await finalizePendingSettlements(admin)).finalized).toBe(0);
     const settlements = await prisma.settlement.findMany({ orderBy: { periodEnd: "asc" }, include: { invoice: true, salesReports: true } });
     for (const s of settlements) {
       const report = s.salesReports[0];

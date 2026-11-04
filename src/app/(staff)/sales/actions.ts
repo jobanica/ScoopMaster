@@ -4,6 +4,7 @@ import { safeAction } from "@/lib/action";
 import { optStr, str } from "@/lib/form";
 import { approveCleanReports, approveSalesReport, rejectSalesReport, reopenSalesReport, reviewSalesEdit, saveCountReport, saveSalesReport } from "@/server/services/sales";
 import { intentSubmit, parseCountForm, parseSalesForm } from "@/server/sales-form-data";
+import { settleReportDay } from "@/server/services/settlements";
 
 export const staffSaveSalesAction = safeAction(async (fd) => {
   const user = await requireUser("sales:write");
@@ -19,8 +20,9 @@ export const staffSaveCountAction = safeAction(async (fd) => {
 export const approveSalesAction = safeAction(async (fd) => {
   const user = await requireUser("sales:review");
   const id = str(fd, "id");
-  await approveSalesReport(user, id, optStr(fd, "reason"));
-  return { revalidate: [`/sales/${id}`, "/sales"], message: "Report approved and consumption posted to inventory." };
+  const r = await approveSalesReport(user, id, optStr(fd, "reason"));
+  const settled = r.autoSettle?.finalized ? ` Settled automatically (${r.autoSettle.finalized}) — the partner can now pay today's share and supplies.` : r.autoSettle?.notes?.length ? ` Settlement not created yet: ${r.autoSettle.notes[0]}` : "";
+  return { revalidate: [`/sales/${id}`, "/sales"], message: (r.method === "INVENTORY_COUNT" ? "Report approved." : "Report approved and consumption posted to inventory.") + settled };
 });
 export const rejectSalesAction = safeAction(async (fd) => {
   const user = await requireUser("sales:review");
@@ -43,4 +45,11 @@ export const approveCleanAction = safeAction(async () => {
   const user = await requireUser("sales:review");
   const r = await approveCleanReports(user);
   return { revalidate: ["/sales"], message: `${r.approved} clean report(s) approved.${r.errors.length ? ` ${r.errors.length} could not be approved: ${r.errors[0]}` : ""}` };
+});
+
+export const settleDayAction = safeAction(async (fd) => {
+  const user = await requireUser("settlements:approve");
+  const id = str(fd, "id");
+  const r = await settleReportDay(user, id);
+  return { revalidate: [`/sales/${id}`], message: r === "settled" ? "Day settled — the partner can now pay." : "This day was already settled." };
 });

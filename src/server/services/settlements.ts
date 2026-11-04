@@ -251,9 +251,9 @@ async function periodHasData(partnerId: string, start: Date, end: Date) {
  * Creates (and optionally submits) every settlement that is due per each partner's schedule, up to yesterday.
  * Consecutive periods without any activity are merged into the next period, so closed days don't create empty settlements.
  */
-export async function createDueSettlements(actor: Actor, opts: { submit: boolean }) {
+export async function createDueSettlements(actor: Actor, opts: { submit: boolean; partnerId?: string; until?: Date }) {
   const today = todayDate();
-  const partners = await prisma.partner.findMany({ where: { status: { in: ["ACTIVE", "ON_HOLD"] }, contracts: { some: {} } }, orderBy: { businessName: "asc" } });
+  const partners = await prisma.partner.findMany({ where: { status: { in: ["ACTIVE", "ON_HOLD"] }, contracts: { some: {} }, ...(opts.partnerId ? { id: opts.partnerId } : {}) }, orderBy: { businessName: "asc" } });
   const result = { created: 0, submitted: 0, skipped: [] as string[] };
   for (const p of partners) {
     for (let guard = 0; guard < 400; guard++) {
@@ -262,7 +262,8 @@ export async function createDueSettlements(actor: Actor, opts: { submit: boolean
       const start = last ? addDays(last.periodEnd, 1) : first!.effectiveFrom;
       const contract = await contractOn(prisma, p.id, start);
       if (!contract) break;
-      const cap = contract.effectiveTo && contract.effectiveTo < today ? contract.effectiveTo : addDays(today, -1);
+      const limit = opts.until && opts.until <= today ? opts.until : addDays(today, -1);
+      const cap = contract.effectiveTo && contract.effectiveTo < limit ? contract.effectiveTo : limit;
       let end = periodEndFor(start, contract.settlementFrequency);
       if (end > cap) break;
       while (!(await periodHasData(p.id, start, end))) {
@@ -271,6 +272,8 @@ export async function createDueSettlements(actor: Actor, opts: { submit: boolean
         end = next;
       }
       if (!(await periodHasData(p.id, start, end))) break;
+      const unreviewed = await prisma.salesReport.count({ where: { partnerId: p.id, reportDate: { gte: start, lte: end }, status: { in: ["DRAFT", "SUBMITTED", "REJECTED"] } } });
+      if (unreviewed) { result.skipped.push(`${p.businessName}: ${unreviewed} report(s) from ${fmtDate(start)} awaiting review`); break; }
       try {
         const s = await createSettlement(actor, { partnerId: p.id, periodStart: start, periodEnd: end });
         result.created++;
@@ -295,4 +298,46 @@ export async function finalizePendingSettlements(actor: Actor) {
     try { await finalizeSettlement(actor, s.id); result.finalized++; } catch (e) { result.failed.push(`${s.number} (${s.partner.businessName}): ${(e as Error).message}`); }
   }
   return result;
+}
+
+/** Settlements prepared automatically by the system (no preparer), so an approver can finalize them. */
+const SYSTEM: Actor = { id: null as unknown as string, role: "SUPER_ADMIN", partnerId: null, name: "System" };
+
+/**
+ * Daily closing-count partners: when a day's count is approved, settle that day straight away so the owner's share is
+ * invoiced and the partner can pay it the same evening. Returns a short status for the approver.
+ */
+export async function autoSettleDailyCount(approver: Actor, report: { partnerId: string; reportDate: Date; method: string }) {
+  if (report.method !== "INVENTORY_COUNT" || !can(approver.role, "settlements:approve")) return null;
+  const contract = await contractOn(prisma, report.partnerId, report.reportDate);
+  if (contract?.settlementFrequency !== "DAILY") return null;
+  // re-submit any system drafts that were waiting on reviews
+  for (const d of await prisma.settlement.findMany({ where: { partnerId: report.partnerId, status: "DRAFT", preparedById: null } })) {
+    try { await submitSettlement(SYSTEM, d.id); } catch { /* still waiting */ }
+  }
+  const created = await createDueSettlements(SYSTEM, { submit: true, partnerId: report.partnerId, until: report.reportDate });
+  let finalized = 0;
+  for (const s of await prisma.settlement.findMany({ where: { partnerId: report.partnerId, status: "PENDING_APPROVAL", preparedById: null }, orderBy: { periodEnd: "asc" } })) {
+    try { await finalizeSettlement(approver, s.id); finalized++; } catch (e) { created.skipped.push((e as Error).message); }
+  }
+  return { finalized, notes: created.skipped };
+}
+
+/** "Settle this day now" for an approved closing count: submits and finalizes that day's settlement in one step. */
+export async function settleReportDay(approver: Actor, reportId: string) {
+  if (!can(approver.role, "settlements:approve")) throw new ForbiddenError();
+  const r = await prisma.salesReport.findUnique({ where: { id: reportId }, include: { settlement: true } });
+  if (!r) throw new NotFoundError("Sales report");
+  if (r.status !== "APPROVED") throw new AppError("Approve the report first.");
+  let s = r.settlement;
+  if (!s) {
+    const res = await autoSettleDailyCount(approver, r);
+    if (res?.finalized) return "settled";
+    s = (await prisma.salesReport.findUniqueOrThrow({ where: { id: reportId }, include: { settlement: true } })).settlement;
+    if (!s) throw new AppError(res?.notes?.[0] ?? "No settlement could be created for this day (is the contract on a daily schedule?).");
+  }
+  if (s.status === "FINALIZED") return "already settled";
+  if (s.status === "DRAFT") await submitSettlement(approver, s.id);
+  await finalizeSettlement(approver, s.id);
+  return "settled";
 }

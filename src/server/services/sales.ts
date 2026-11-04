@@ -14,6 +14,7 @@ import { assertPeriodOpen } from "./periods";
 import { contractOn } from "./partners";
 import { getRule, notify, notifyPartner } from "./notifications";
 import { INFLOW_TYPES, closeShiftWithReport, openShiftFor, reopenShiftForReport } from "./shifts";
+import { autoSettleDailyCount } from "./settlements";
 
 const productInclude = {
   components: { include: { item: true } },
@@ -196,7 +197,9 @@ async function approveInTx(tx: Tx, actor: Actor, id: string, notes?: string | nu
 }
 
 export async function approveSalesReport(actor: Actor, id: string, notes?: string | null) {
-  return withTx((tx) => approveInTx(tx, actor, id, notes));
+  const r = await withTx((tx) => approveInTx(tx, actor, id, notes));
+  const autoSettle = await autoSettleDailyCount(actor, r).catch((e: Error) => ({ finalized: 0, notes: [e.message] }));
+  return Object.assign(r, { autoSettle });
 }
 
 /** Bulk-approve submitted reports with no discrepancy (each in its own transaction). */
@@ -206,8 +209,9 @@ export async function approveCleanReports(actor: Actor, ids?: string[]) {
   const errors: string[] = [];
   for (const r of reports) {
     try {
-      await withTx((tx) => approveInTx(tx, actor, r.id));
+      const done = await withTx((tx) => approveInTx(tx, actor, r.id));
       ok++;
+      await autoSettleDailyCount(actor, done).catch((e: Error) => errors.push(e.message));
     } catch (e) {
       errors.push((e as Error).message);
     }
@@ -398,7 +402,7 @@ export async function countFormData(db: Tx | typeof prisma, partnerId: string, d
       received: qty(inflows.find((x) => x.itemId === i.id)?._sum.quantity ?? 0),
       unitValue: D(basis === "OWNER_COST" ? i.avgCost : i.partnerPrice),
       isContainer: driverIds.has(i.id),
-      required: driverIds.has(i.id) || i.category === "ICE_CREAM_POWDER",
+      required: (driverIds.has(i.id) || i.category === "ICE_CREAM_POWDER") && D(onHand.get(i.id)).gt(0),
     }));
   return { contract, drivers, rows: rows.map((r) => ({ ...r, opening: r.expected.minus(r.received) })), pricing, shift };
 }
@@ -444,7 +448,8 @@ export async function saveCountReport(actor: Actor, input: CountReportInput, opt
     const countBy = new Map(input.counts.map((c) => [c.itemId, c]));
     const items: CountItem[] = data.rows.map((r) => {
       const c = countBy.get(r.item.id);
-      const closing = c?.closing ?? null;
+      // Nothing on hand per records and left blank → counted as 0 (no need to count flavours the store doesn't have).
+      const closing = (c?.closing === null || c?.closing === undefined || c?.closing === "") && r.expected.isZero() ? "0" : c?.closing ?? null;
       if (r.required && opts.submit && (closing === null || closing === "")) throw new AppError(`Please count ${r.item.name}.`);
       return { itemId: r.item.id, name: r.item.name, expected: r.expected, closing: closing === "" ? null : closing, wasted: c?.wasted || 0, unitValue: r.unitValue, isContainer: r.isContainer };
     });

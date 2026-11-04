@@ -148,6 +148,13 @@ closes the shift (a shift is recorded automatically if the partner forgot to ope
 shift. A shift left open blocks the next day until its closing count is submitted. Staff see every partner's shift
 status on **Sales → Partner shifts**.
 
+**Daily pay-in** (daily closing-count partners) — approving a day's count settles that day automatically (system-prepared,
+finalized by the approver), creating the owner-share invoice. The partner then sees **Pay ₱X** = owner share + supplies
+used that day, pays by GCash/cash/bank with proof, and Finance verifies. On verification the payment is applied to the
+day's owner-share invoice first, then to the partner's supply invoices oldest first (re-split against current
+balances); anything beyond open invoices stays as unapplied credit. Staff can also press **Settle this day now** on an
+approved report.
+
 **Supply orders** — Request → Approve (quantities adjustable, prices snapshotted) / Reject → Preparing → Dispatch
 (warehouse → In Transit; warehouse stock decreases) → Receipt confirmation by partner or staff (In Transit → partner
 location; shortfalls written off as DAMAGED) → **SUPPLY invoice** generated for received quantities with cost

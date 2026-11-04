@@ -10,6 +10,7 @@ import { cancelSupplyOrder, confirmSupplyReceipt, createSupplyRequest } from "@/
 import { submitPartnerExpense, submitPartnerPayment } from "@/server/services/finance";
 import { reportMachineProblem } from "@/server/services/machines";
 import { openShift } from "@/server/services/shifts";
+import { submitDailyPayment } from "@/server/services/daily-pay";
 import { intentSubmit, parseCountForm, parseSalesForm } from "@/server/sales-form-data";
 import { parseSupplyLines, qtyMap } from "@/server/supply-form";
 
@@ -84,4 +85,16 @@ export const partnerOpenShiftAction = safeAction(async (fd) => {
   });
   await openShift(user, { partnerId: user.partnerId, counts, notes: optStr(fd, "notes") });
   return "/portal?shift=opened";
+});
+
+export const partnerDailyPayAction = safeAction(async (fd) => {
+  const user = await requirePartnerAction();
+  const method = oneOf(fd, "method", ["CASH", "GCASH", "BANK_TRANSFER", "OTHER"] as const);
+  const file = fd.get("proof");
+  const stored = file instanceof File && file.size > 0 ? await storeUpload(file) : null;
+  if (!stored && method !== "CASH") throw new AppError("Please attach your proof of payment (screenshot or photo).");
+  const reportId = str(fd, "reportId");
+  const p = await submitDailyPayment(user, { reportId, paymentDate: date(fd, "paymentDate", "Date paid"), amount: amount(fd, "amount", "Amount"), method, reference: optStr(fd, "reference"), notes: optStr(fd, "notes") });
+  if (stored) await prisma.attachment.create({ data: { ...stored, entityType: "Payment", entityId: p.id, partnerId: user.partnerId, category: "PROOF_OF_PAYMENT", uploadedById: user.id } });
+  return `/portal/sales/${reportId}?paid=1`;
 });

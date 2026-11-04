@@ -13,7 +13,7 @@ import { allocatePaymentAction, verifyPaymentAction, voidPaymentAction } from ".
 
 export default async function PaymentPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePage("finance:read");
-  const p = await prisma.payment.findUnique({ where: { id: (await params).id }, include: { allocations: { include: { invoice: true, bill: true } }, partner: true, contact: true } });
+  const p = await prisma.payment.findUnique({ where: { id: (await params).id }, include: { allocations: { include: { invoice: true, bill: true } }, partner: true, contact: true, salesReport: true } });
   if (!p) notFound();
   const applied = p.allocations.reduce((a, x) => a.plus(D(x.amount)), new Decimal(0));
   const unapplied = D(p.amount).minus(applied);
@@ -28,7 +28,7 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
         <PrintButton label="Print receipt" />
         {p.status === "CONFIRMED" && <a className="btn-secondary" href={`/api/pdf/receipt/${p.id}`}>Download PDF</a>}
         {p.status === "PENDING_VERIFICATION" && can(user.role, "payments:verify") && <>
-          <ConfirmAction action={verifyPaymentAction} label="Verify & apply" title="Confirm this payment?" description="Check the proof of payment and that funds were received. The amounts will be applied to the selected invoices." hidden={{ id: p.id, decision: "approve" }} variant="success" reasonLabel="Notes (optional)" />
+          <ConfirmAction action={verifyPaymentAction} label="Verify & apply" title="Confirm this payment?" description={p.salesReport ? "Check the proof and that the funds arrived. It will be applied to the owner's share for that day first, then to supply invoices (oldest first)." : "Check the proof of payment and that funds were received. The amounts will be applied to the selected invoices."} hidden={{ id: p.id, decision: "approve" }} variant="success" reasonLabel="Notes (optional)" />
           <ConfirmAction action={verifyPaymentAction} label="Reject" title="Reject this payment?" hidden={{ id: p.id, decision: "reject" }} variant="danger" reasonLabel="Reason (shown to partner)" reasonRequired />
         </>}
         {p.status === "CONFIRMED" && can(user.role, "payments:verify") && <ConfirmAction action={voidPaymentAction} label="Void" title="Void payment?" description="Applied amounts are reversed and invoice/bill balances restored. The payment stays on record." hidden={{ id: p.id }} variant="danger" reasonLabel="Reason" reasonRequired />}
@@ -38,7 +38,7 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
           <div className="mb-4 text-center"><p className="text-xs uppercase tracking-widest text-choco-500">SCOOP MASTER · {p.direction === "IN" ? "Official receipt" : "Payment voucher"}</p><p className="mt-1 text-3xl font-bold"><Peso v={p.amount} /></p></div>
           <DL cols={3} items={[
             [p.direction === "IN" ? "Received from" : "Paid to", p.partner ? <Link key="p" className="link" href={`/partners/${p.partner.id}`}>{p.partyName}</Link> : p.partyName], ["Date", fmtDate(p.paymentDate)], ["Method", humanize(p.method)],
-            ["Reference", p.reference], ["Recorded", fmtDateTime(p.createdAt)], ["Verified", fmtDateTime(p.verifiedAt)], ["Notes", p.notes], ["Void / reject reason", p.voidReason],
+            ["Reference", p.reference], ...(p.salesReport ? [["Daily pay-in for", <Link key="sr" className="link" href={`/sales/${p.salesReport.id}`}>{p.salesReport.number} ({fmtDate(p.salesReport.reportDate)})</Link>] as [string, React.ReactNode]] : []), ["Recorded", fmtDateTime(p.createdAt)], ["Verified", fmtDateTime(p.verifiedAt)], ["Notes", p.notes], ["Void / reject reason", p.voidReason],
           ]} />
         </Card>
         <Card title="Application">
