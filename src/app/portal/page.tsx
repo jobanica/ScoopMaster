@@ -6,7 +6,8 @@ import { addDays, fmtDate, startOfMonth, todayDate } from "@/lib/dates";
 import { balanceOf } from "@/lib/calc/payments";
 import { UOM_LABEL } from "@/lib/units";
 import { Alert, Card, Peso, Stat } from "@/components/ui";
-import { BarChartBox, PALETTE } from "@/components/charts";
+import { BarChartBox } from "@/components/charts";
+import { PALETTE } from "@/lib/palette";
 
 export const metadata = { title: "My dashboard" };
 export default async function PortalHome() {

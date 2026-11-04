@@ -2,7 +2,7 @@
   "name": "scoop-master",
   "version": "0.1.0",
   "private": true,
-  "description": "SCOOP MASTER — Soft-Serve Ice Cream Partnership & Business Management System",
+  "description": "SCOOP MASTER \u2014 Soft-Serve Ice Cream Partnership & Business Management System",
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
@@ -49,5 +49,10 @@
     "tsx": "4.23.15",
     "typescript": "5.8.3",
     "vitest": "3.2.7"
+  },
+  "overrides": {
+    "recharts": {
+      "react-is": "19.1.1"
+    }
   }
 }

@@ -6,7 +6,7 @@ export type Series = { key: string; label: string; color: string };
 const peso = (v: number) => "₱" + v.toLocaleString("en-PH", { maximumFractionDigits: 0 });
 const pesoFull = (v: number) => "₱" + v.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export const PALETTE = ["#7A4E36", "#D9607F", "#3FA67D", "#E0A82E", "#4A86C5", "#B8977F", "#A23A57", "#257556"];
+import { PALETTE } from "@/lib/palette";
 
 function allZero(data: Record<string, string | number>[], series: Series[]) {
   return data.every((d) => series.every((s) => !Number(d[s.key])));

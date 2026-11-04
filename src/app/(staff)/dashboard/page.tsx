@@ -8,7 +8,8 @@ import { one, rangeParams, type SP } from "@/lib/params";
 import { balanceOf } from "@/lib/calc/payments";
 import { dashboardData } from "@/server/services/dashboard";
 import { Alert, Card, Empty, FilterBar, FilterField, PageHeader, Peso, Stat } from "@/components/ui";
-import { BarChartBox, LineChartBox, PieChartBox, PALETTE } from "@/components/charts";
+import { BarChartBox, LineChartBox, PieChartBox } from "@/components/charts";
+import { PALETTE } from "@/lib/palette";
 import { UOM_LABEL } from "@/lib/units";
 
 export const metadata = { title: "Dashboard" };
