@@ -1,12 +1,34 @@
 "use client";
-import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useActionState, useContext, useEffect, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import type { ActionState } from "@/lib/action";
 
 type Action = (prev: ActionState, fd: FormData) => Promise<ActionState>;
 
+const PendingContext = createContext(false);
+
+/**
+ * Submits a server action WITHOUT React 19's automatic form reset, so a validation error never wipes what the
+ * user typed. The clicked submit button's name/value is included (e.g. intent=submit|draft).
+ */
+export function useActionSubmit(action: Action) {
+  const [state, formAction] = useActionState(action, null);
+  const [pending, startTransition] = useTransition();
+  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget, (e.nativeEvent as SubmitEvent).submitter as HTMLElement | null);
+    startTransition(() => formAction(fd));
+  };
+  return { state, pending, onSubmit };
+}
+
+export function PendingProvider({ pending, children }: { pending: boolean; children: ReactNode }) {
+  return <PendingContext.Provider value={pending}>{children}</PendingContext.Provider>;
+}
+
 export function SubmitButton({ children, className = "btn-primary", pendingText = "Saving…", name, value }: { children: ReactNode; className?: string; pendingText?: string; name?: string; value?: string }) {
-  const { pending } = useFormStatus();
+  const { pending: formPending } = useFormStatus();
+  const pending = useContext(PendingContext) || formPending;
   return (
     <button type="submit" className={className} disabled={pending} name={name} value={value}>
       {pending ? pendingText : children}
@@ -16,17 +38,19 @@ export function SubmitButton({ children, className = "btn-primary", pendingText 
 
 /** Form bound to a safeAction; shows inline error / success. */
 export function ActionForm({ action, children, className = "space-y-4", resetOnSuccess = false, successMessage }: { action: Action; children: ReactNode; className?: string; resetOnSuccess?: boolean; successMessage?: string }) {
-  const [state, formAction] = useActionState(action, null);
+  const { state, pending, onSubmit } = useActionSubmit(action);
   const ref = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (state?.ok && resetOnSuccess) ref.current?.reset();
   }, [state, resetOnSuccess]);
   return (
-    <form ref={ref} action={formAction} className={className}>
+    <PendingProvider pending={pending}>
+    <form ref={ref} onSubmit={onSubmit} className={className}>
       {state?.error && <div role="alert" className="rounded-lg bg-berry-50 px-3 py-2 text-sm font-medium text-berry-700">{state.error}</div>}
       {state?.ok && <div role="status" className="rounded-lg bg-mint-50 px-3 py-2 text-sm font-medium text-mint-700">{successMessage ?? state.message}</div>}
       {children}
     </form>
+    </PendingProvider>
   );
 }
 
@@ -41,7 +65,7 @@ export function ConfirmAction({
   size?: "sm"; reasonLabel?: string; reasonRequired?: boolean; confirmLabel?: string; children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [state, formAction] = useActionState(action, null);
+  const { state, pending, onSubmit } = useActionSubmit(action);
   useEffect(() => {
     if (state?.ok) setOpen(false);
   }, [state]);
@@ -55,7 +79,8 @@ export function ConfirmAction({
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-choco-900">{title}</h3>
             {description && <div className="mt-1 text-sm text-choco-600">{description}</div>}
-            <form action={formAction} className="mt-4 space-y-3">
+            <PendingProvider pending={pending}>
+            <form onSubmit={onSubmit} className="mt-4 space-y-3">
               {Object.entries(hidden).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
               {children}
               {reasonLabel && (
@@ -70,6 +95,7 @@ export function ConfirmAction({
                 <SubmitButton className={variant === "danger" ? "btn-danger" : "btn-primary"} pendingText="Working…">{confirmLabel}</SubmitButton>
               </div>
             </form>
+            </PendingProvider>
           </div>
         </div>
       )}

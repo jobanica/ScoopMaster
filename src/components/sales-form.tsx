@@ -1,8 +1,8 @@
 "use client";
-import { useActionState, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Decimal from "decimal.js";
 import type { ActionState } from "@/lib/action";
-import { SubmitButton } from "./forms";
+import { PendingProvider, SubmitButton, useActionSubmit } from "./forms";
 
 type Product = { id: string; code: string; name: string; price: string };
 type Item = { id: string; name: string; uom: string };
@@ -18,7 +18,7 @@ const dec = (s: string) => { try { return new Decimal((s || "0").replace(/[,₱\
 export function SalesReportForm({ action, products, machines, items, initial, partnerId }: {
   action: (p: ActionState, fd: FormData) => Promise<ActionState>; products: Product[]; machines: { id: string; code: string }[]; items: Item[]; initial: Initial; partnerId?: string;
 }) {
-  const [state, formAction] = useActionState(action, null);
+  const { state, pending, onSubmit } = useActionSubmit(action);
   const [lines, setLines] = useState(initial.lines);
   const [money, setMoney] = useState({ discounts: initial.discounts, refunds: initial.refunds, cashSales: initial.cashSales, gcashSales: initial.gcashSales, otherSales: initial.otherSales, actualCash: initial.actualCash, reportedTotal: initial.reportedTotal });
   const calc = useMemo(() => {
@@ -34,7 +34,8 @@ export function SalesReportForm({ action, products, machines, items, initial, pa
   const m = (k: keyof typeof money) => ({ name: k, value: money[k], onChange: (e: React.ChangeEvent<HTMLInputElement>) => setMoney({ ...money, [k]: e.target.value }), className: "input text-right", inputMode: "decimal" as const });
 
   return (
-    <form action={formAction} className="space-y-5">
+    <PendingProvider pending={pending}>
+    <form onSubmit={onSubmit} className="space-y-5">
       {partnerId && <input type="hidden" name="partnerId" value={partnerId} />}
       {state?.error && <div role="alert" className="rounded-lg bg-berry-50 px-3 py-2 text-sm font-medium text-berry-700">{state.error}</div>}
       {state?.ok && <div role="status" className="rounded-lg bg-mint-50 px-3 py-2 text-sm font-medium text-mint-700">{state.message}</div>}
@@ -110,6 +111,7 @@ export function SalesReportForm({ action, products, machines, items, initial, pa
       </div>
       <p className="text-xs text-choco-500">After submission the report is locked. Corrections require an approved edit request.</p>
     </form>
+    </PendingProvider>
   );
 }
 

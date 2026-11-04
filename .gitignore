@@ -10,3 +10,4 @@ storage/
 backups/
 .DS_Store
 npm-debug.log*
+.vercel
