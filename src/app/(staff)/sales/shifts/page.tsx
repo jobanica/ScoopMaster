@@ -35,7 +35,7 @@ export default async function ShiftsPage({ searchParams }: { searchParams: SP })
                 <td>{shift ? <><span className="font-mono text-xs">{shift.number}</span> <StatusBadge status={shift.status} /></> : report ? <Badge tone="vanilla">counted, no shift</Badge> : <Badge tone="berry">not opened</Badge>}</td>
                 <td className="text-xs">{shift ? (shift.autoOpened ? "not opened (recorded at close)" : fmtDateTime(shift.openedAt)) : "—"}</td>
                 <td className="text-xs">{shift?.closedAt ? fmtDateTime(shift.closedAt) : "—"}</td>
-                <td className="text-xs">{shift?.lines.filter((l) => !D(l.variance).isZero()).map((l) => <div key={l.id} className="text-berry-700">{l.item.name}: {D(l.variance).isPositive() ? "+" : ""}{formatQty(l.variance, 3)} (had {formatQty(l.carriedOver, 3)})</div>) ?? null}{shift && !shift.hasDiscrepancy && !shift.autoOpened && <span className="text-mint-700">matched</span>}</td>
+                <td className="text-xs">{shift?.lines.filter((l) => !D(l.variance).isZero()).map((l) => <div key={l.id} className="text-berry-700">{l.item.name}: {D(l.variance).isPositive() ? "+" : ""}{formatQty(l.variance, 3)} (had {formatQty(l.carriedOver, 3)}){l.treatedAsSold ? " · counted as sold" : " · written off"}</div>) ?? null}{shift && !shift.hasDiscrepancy && !shift.autoOpened && <span className="text-mint-700">matched</span>}</td>
                 <td className="num">{report ? <Link className="link" href={`/sales/${report.id}`}><Peso v={report.netSales} /></Link> : "—"}</td>
                 <td className="num">{report ? <Peso v={report.estimatedProfit} /> : "—"}</td>
               </tr>

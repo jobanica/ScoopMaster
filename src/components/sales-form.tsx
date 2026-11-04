@@ -50,16 +50,16 @@ export function SalesReportForm({ action, products, machines, items, initial, pa
       </div>
 
       <div className="card table-wrap">
-        <table className="tbl">
+        <table className="tbl tbl-stack">
           <thead><tr><th>Product</th><th className="num">Price</th><th className="num">Qty sold</th><th className="num">Wastage</th><th className="num">Total</th></tr></thead>
           <tbody>
             {products.map((p) => (
               <tr key={p.id}>
-                <td>{p.name}<input type="hidden" name="productId" value={p.id} /></td>
-                <td className="num">{peso(new Decimal(p.price))}</td>
-                <td className="num"><input className="input w-20 text-right" name={`qty_${p.id}`} inputMode="numeric" value={lines[p.id]?.quantity || ""} placeholder="0" onChange={(e) => setQ(p.id, "quantity", e.target.value)} /></td>
-                <td className="num"><input className="input w-20 text-right" name={`waste_${p.id}`} inputMode="numeric" value={lines[p.id]?.wastageQty || ""} placeholder="0" onChange={(e) => setQ(p.id, "wastageQty", e.target.value)} /></td>
-                <td className="num">{peso(new Decimal(p.price).times(lines[p.id]?.quantity ?? 0))}</td>
+                <td className="stack-title">{p.name}<input type="hidden" name="productId" value={p.id} /></td>
+                <td data-label="Price" className="num">{peso(new Decimal(p.price))}</td>
+                <td data-label="Qty sold" className="num"><input className="input w-20 text-right" name={`qty_${p.id}`} inputMode="numeric" value={lines[p.id]?.quantity || ""} placeholder="0" onChange={(e) => setQ(p.id, "quantity", e.target.value)} /></td>
+                <td data-label="Wastage" className="num"><input className="input w-20 text-right" name={`waste_${p.id}`} inputMode="numeric" value={lines[p.id]?.wastageQty || ""} placeholder="0" onChange={(e) => setQ(p.id, "wastageQty", e.target.value)} /></td>
+                <td data-label="Total" className="num">{peso(new Decimal(p.price).times(lines[p.id]?.quantity ?? 0))}</td>
               </tr>
             ))}
           </tbody>
@@ -93,11 +93,11 @@ export function SalesReportForm({ action, products, machines, items, initial, pa
       {items.length > 0 && (
         <details className="card p-4">
           <summary className="cursor-pointer text-sm font-semibold">Opening / closing inventory (optional)</summary>
-          <div className="table-wrap mt-3"><table className="tbl">
+          <div className="table-wrap mt-3"><table className="tbl tbl-stack">
             <thead><tr><th>Item</th><th className="num">Opening</th><th className="num">Received</th><th className="num">Closing</th></tr></thead>
             <tbody>{items.map((it) => (
-              <tr key={it.id}><td>{it.name} <span className="text-xs text-choco-500">({it.uom})</span><input type="hidden" name="stockItemId" value={it.id} /></td>
-                {(["opening", "received", "closing"] as const).map((k) => <td key={k} className="num"><input className="input w-24 text-right" name={`${k}_${it.id}`} defaultValue={initial.stock[it.id]?.[k] ?? ""} inputMode="decimal" /></td>)}
+              <tr key={it.id}><td className="stack-title">{it.name} <span className="text-xs text-choco-500">({it.uom})</span><input type="hidden" name="stockItemId" value={it.id} /></td>
+                {(["opening", "received", "closing"] as const).map((k) => <td key={k} className="num" data-label={k[0].toUpperCase() + k.slice(1)}><input className="input w-24 text-right" name={`${k}_${it.id}`} defaultValue={initial.stock[it.id]?.[k] ?? ""} inputMode="decimal" /></td>)}
               </tr>
             ))}</tbody>
           </table></div>

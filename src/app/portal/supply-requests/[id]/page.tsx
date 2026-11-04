@@ -21,11 +21,11 @@ export default async function PortalSupplyDetail({ params }: { params: Promise<{
       <Card title={receiving ? "Confirm what you received" : "Items"} pad={false}>
         <ActionForm action={partnerReceiveAction} className="space-y-0">
           <input type="hidden" name="id" value={o.id} />
-          <table className="tbl"><thead><tr><th>Item</th><th className="num">Requested</th><th className="num">Approved</th><th className="num">Received</th><th className="num">Price</th></tr></thead>
+          <table className="tbl tbl-stack"><thead><tr><th>Item</th><th className="num">Requested</th><th className="num">Approved</th><th className="num">Received</th><th className="num">Price</th></tr></thead>
             <tbody>{o.lines.map((l) => (
-              <tr key={l.id}><td>{l.item.name} <span className="text-xs text-choco-500">{UOM_LABEL[l.item.uom]}</span></td><td className="num">{formatQty(l.requestedQty)}</td><td className="num">{l.approvedQty !== null ? formatQty(l.approvedQty) : "—"}</td>
-                <td className="num">{receiving && D(l.approvedQty ?? 0).gt(0) ? <input className="input w-20 text-right" name={`received_${l.id}`} defaultValue={l.approvedQty?.toString()} inputMode="decimal" /> : l.receivedQty !== null ? formatQty(l.receivedQty) : "—"}</td>
-                <td className="num"><Peso v={l.unitPrice} /></td></tr>
+              <tr key={l.id}><td className="stack-title">{l.item.name} <span className="text-xs text-choco-500">{UOM_LABEL[l.item.uom]}</span></td><td data-label="Requested" className="num">{formatQty(l.requestedQty)}</td><td data-label="Approved" className="num">{l.approvedQty !== null ? formatQty(l.approvedQty) : "—"}</td>
+                <td data-label="Received" className="num">{receiving && D(l.approvedQty ?? 0).gt(0) ? <input className="input w-20 text-right" name={`received_${l.id}`} defaultValue={l.approvedQty?.toString()} inputMode="decimal" /> : l.receivedQty !== null ? formatQty(l.receivedQty) : "—"}</td>
+                <td data-label="Price" className="num"><Peso v={l.unitPrice} /></td></tr>
             ))}</tbody></table>
           {receiving && <div className="space-y-3 p-4"><TextArea label="Notes (damaged or missing items)" name="notes" rows={2} /><SubmitButton>Confirm receipt</SubmitButton><p className="text-xs text-choco-500">Only received quantities are invoiced and added to your stock.</p></div>}
         </ActionForm>

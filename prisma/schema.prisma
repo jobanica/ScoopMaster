@@ -759,7 +759,8 @@ model ShiftLine {
   receivedSince Decimal       @default(0) @db.Decimal(14, 4) // deliveries between the previous closing and opening
   carriedOver   Decimal       @db.Decimal(14, 4) // opening stock per records
   counted       Decimal?      @db.Decimal(14, 4) // partner's opening count when it differs
-  variance      Decimal       @default(0) @db.Decimal(14, 4) // counted − carriedOver (posted as COUNT_VARIANCE)
+  variance      Decimal       @default(0) @db.Decimal(14, 4) // counted − carriedOver
+  treatedAsSold Boolean       @default(false) // missing cones/cups: not written off; the closing count picks them up as sold
 
   @@unique([shiftId, itemId])
 }

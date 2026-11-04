@@ -61,27 +61,27 @@ export function SalesReportView({ r, showCost, audience = "staff" }: { r: Loaded
       </div>
       {isCount && (
         <Card title="Closing count" pad={false}>
-          <div className="table-wrap"><table className="tbl">
+          <div className="table-wrap"><table className="tbl tbl-stack">
             <thead><tr><th>Item</th><th className="num">Opening</th><th className="num">Received</th><th className="num">Should have</th><th className="num">Counted</th><th className="num">Wasted</th><th className="num">Used</th><th className="num">Cost</th></tr></thead>
             <tbody>{r.stockLines.map((s) => (
-              <tr key={s.id}><td>{s.item.name} {!s.counted && <Badge tone="gray">estimated</Badge>}</td><td className="num">{formatQty(s.opening, 3)}</td><td className="num">{formatQty(s.received, 3)}</td><td className="num">{formatQty(D(s.opening).plus(D(s.received)), 3)}</td><td className="num">{s.counted ? formatQty(s.closing, 3) : "—"}</td><td className="num">{formatQty(s.wasted, 3)}</td><td className="num font-semibold">{formatQty(s.used, 3)}</td><td className="num"><Peso v={D(s.used).times(D(s.unitValue))} /></td></tr>
+              <tr key={s.id}><td className="stack-title">{s.item.name} {!s.counted && <Badge tone="gray">estimated</Badge>}</td><td data-label="Opening" className="num stack-hide">{formatQty(s.opening, 3)}</td><td data-label="Received" className="num stack-hide">{formatQty(s.received, 3)}</td><td data-label="Should have" className="num">{formatQty(D(s.opening).plus(D(s.received)), 3)}</td><td data-label="Counted" className="num">{s.counted ? formatQty(s.closing, 3) : "—"}</td><td data-label="Wasted" className="num">{formatQty(s.wasted, 3)}</td><td data-label="Used" className="num font-semibold">{formatQty(s.used, 3)}</td><td data-label="Cost" className="num"><Peso v={D(s.used).times(D(s.unitValue))} /></td></tr>
             ))}</tbody>
           </table></div>
         </Card>
       )}
       <Card title={isCount ? `Sales derived from the count · ${r.totalUnits} sold` : `Products sold · ${r.totalUnits} units · ${r.wastageUnits} wasted`} pad={false}>
-        <div className="table-wrap"><table className="tbl">
+        <div className="table-wrap"><table className="tbl tbl-stack">
           <thead><tr><th>Product</th><th className="num">Qty</th><th className="num">Wastage</th><th className="num">Price</th><th className="num">Total</th>{showCost && !isCount && <th className="num">Unit cost (est.)</th>}</tr></thead>
           <tbody>{r.lines.map((l) => (
-            <tr key={l.id}><td>{l.product.name}</td><td className="num">{l.quantity}</td><td className="num">{l.wastageQty}</td><td className="num"><Peso v={l.unitPrice} /></td><td className="num"><Peso v={l.lineTotal} /></td>{showCost && !isCount && <td className="num"><Peso v={l.unitCost} /></td>}</tr>
+            <tr key={l.id}><td className="stack-title">{l.product.name}</td><td data-label="Qty" className="num">{l.quantity}</td><td data-label="Wastage" className="num">{l.wastageQty}</td><td data-label="Price" className="num"><Peso v={l.unitPrice} /></td><td data-label="Total" className="num"><Peso v={l.lineTotal} /></td>{showCost && !isCount && <td data-label="Unit cost (est.)" className="num"><Peso v={l.unitCost} /></td>}</tr>
           ))}</tbody>
         </table></div>
       </Card>
       {!isCount && r.stockLines.length > 0 && (
         <Card title="Opening / closing inventory (as reported)" pad={false}>
-          <table className="tbl"><thead><tr><th>Item</th><th className="num">Opening</th><th className="num">Received</th><th className="num">Closing</th><th className="num">Implied usage</th></tr></thead>
+          <table className="tbl tbl-stack"><thead><tr><th>Item</th><th className="num">Opening</th><th className="num">Received</th><th className="num">Closing</th><th className="num">Implied usage</th></tr></thead>
             <tbody>{r.stockLines.map((s) => (
-              <tr key={s.id}><td>{s.item.name}</td><td className="num">{formatQty(s.opening, 3)}</td><td className="num">{formatQty(s.received, 3)}</td><td className="num">{formatQty(s.closing, 3)}</td><td className="num">{formatQty(D(s.opening).plus(D(s.received)).minus(D(s.closing)), 3)}</td></tr>
+              <tr key={s.id}><td className="stack-title">{s.item.name}</td><td data-label="Opening" className="num stack-hide">{formatQty(s.opening, 3)}</td><td data-label="Received" className="num stack-hide">{formatQty(s.received, 3)}</td><td data-label="Closing" className="num">{formatQty(s.closing, 3)}</td><td data-label="Implied usage" className="num">{formatQty(D(s.opening).plus(D(s.received)).minus(D(s.closing)), 3)}</td></tr>
             ))}</tbody></table>
         </Card>
       )}

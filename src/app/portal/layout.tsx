@@ -18,8 +18,8 @@ export default async function PortalLayout({ children }: { children: React.React
     { href: "/portal/more", label: "More", icon: Menu },
   ];
   return (
-    <div className="min-h-screen pb-20">
-      <header className="no-print sticky top-0 z-20 flex items-center justify-between bg-choco-800 px-4 py-3 text-cream-50">
+    <div className="min-h-screen pb-[calc(5rem+env(safe-area-inset-bottom))]">
+      <header className="no-print sticky top-0 z-20 flex items-center justify-between bg-choco-800 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] text-cream-50">
         <Link href="/portal" className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cream-200 text-choco-800"><IceCreamCone size={17} /></span>
           <span><span className="block text-xs font-extrabold tracking-widest">SCOOP MASTER</span><span className="block text-[11px] text-choco-100">{partner.businessName}</span></span>
@@ -30,8 +30,8 @@ export default async function PortalLayout({ children }: { children: React.React
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
-      <nav className="no-print fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-choco-100 bg-white">
-        {nav.map((n) => <Link key={n.href} href={n.href} className="flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium text-choco-600 hover:text-choco-900"><n.icon size={20} />{n.label}</Link>)}
+      <nav className="no-print fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-choco-100 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(62,38,27,0.06)]">
+        {nav.map((n) => <Link key={n.href} href={n.href} className="flex min-h-[56px] flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium text-choco-600 hover:text-choco-900 active:bg-cream-100"><n.icon size={20} />{n.label}</Link>)}
       </nav>
     </div>
   );

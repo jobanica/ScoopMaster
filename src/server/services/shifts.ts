@@ -76,8 +76,14 @@ export async function openShift(actor: Actor, input: { partnerId: string; counts
       if (counted && counted.isNegative()) throw new AppError(`${r.item.name}: count cannot be negative.`);
       if (counted && ["CONES", "CUPS"].includes(r.item.category) && !counted.isInteger()) throw new AppError(`${r.item.name} must be counted in whole pieces.`);
       const variance = counted ? counted.minus(r.carriedOver) : new Decimal(0);
-      await tx.shiftLine.create({ data: { shiftId: shift.id, itemId: r.item.id, lastClosing: r.lastClosing?.toString() ?? null, receivedSince: r.receivedSince.toString(), carriedOver: r.carriedOver.toString(), counted: counted?.toString() ?? null, variance: variance.toString() } });
-      if (!variance.isZero()) {
+      // Missing cones/cups are NOT written off: the records keep the carried-over amount, so tonight's closing
+      // count derives them as sold (the partner owes the sale). Other differences are posted as a count variance.
+      const asSold = variance.isNegative() && ["CONES", "CUPS"].includes(r.item.category);
+      await tx.shiftLine.create({ data: { shiftId: shift.id, itemId: r.item.id, lastClosing: r.lastClosing?.toString() ?? null, receivedSince: r.receivedSince.toString(), carriedOver: r.carriedOver.toString(), counted: counted?.toString() ?? null, variance: variance.toString(), treatedAsSold: asSold } });
+      if (variance.isZero()) continue;
+      if (asSold) {
+        differences.push(`${r.item.name} ${variance.toString()} (will be counted as sold)`);
+      } else {
         await postMovement(tx, { type: "COUNT_VARIANCE", itemId: r.item.id, locationId: loc.id, quantity: variance, sourceType: "Shift", sourceId: shift.id, reason: `Opening count ${shift.number}: counted ${counted} vs ${r.carriedOver} carried over`, userId: actor.id });
         differences.push(`${r.item.name} ${variance.isNegative() ? "" : "+"}${variance.toString()}`);
       }

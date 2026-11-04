@@ -119,20 +119,25 @@ describe("inventory-count reporting workflow", () => {
     expect(opening.rows.find((r) => r.item.id === ids.powder)!.carriedOver.toString()).toBe("1");
 
     // the partner finds only 198 cones in the morning
-    const shift = await openShift(partner, { partnerId: "ignored", counts: [{ itemId: ids.cone, counted: "198" }, { itemId: ids.cup, counted: null }] });
+    const shift = await openShift(partner, { partnerId: "ignored", counts: [{ itemId: ids.cone, counted: "198" }, { itemId: ids.cup, counted: null }, { itemId: ids.powder, counted: "0.9" }] });
     expect(shift.businessDate.toISOString().slice(0, 10)).toBe(today.toISOString().slice(0, 10));
-    expect(await level(ids.cone)).toBe("198");
+    expect(await level(ids.cone)).toBe("200"); // missing cones are not written off…
+    expect(await level(ids.powder)).toBe("0.9"); // …but a powder difference is
     const s1 = await prisma.shift.findUniqueOrThrow({ where: { id: shift.id }, include: { lines: true } });
     expect(s1.hasDiscrepancy).toBe(true);
     expect(s1.lines.find((l) => l.itemId === ids.cone)!.variance.toString()).toBe("-2");
+    expect(s1.lines.find((l) => l.itemId === ids.cone)!.treatedAsSold).toBe(true);
+    expect(s1.lines.find((l) => l.itemId === ids.powder)!.treatedAsSold).toBe(false);
     expect(await prisma.notification.count({ where: { type: "SHIFT_VARIANCE" } })).toBeGreaterThan(0);
     await expect(openShift(partner, { partnerId: "x", counts: [] })).rejects.toThrow(/already open/);
 
-    // closing: 198 opening → 150 left = 48 cones sold
-    const r = await saveCountReport(partner, { partnerId: "x", reportDate: today, counts: counts({ cone: "150", cup: "85", powder: "0.05", spoon: "85" }), ...money0, cashSales: "1200", gcashSales: "0" }, { submit: true });
-    expect(r.totalUnits).toBe(48);
+    // closing: 200 carried over (2 missing at opening) → 150 left = 50 cones sold, the 2 missing included
+    const r = await saveCountReport(partner, { partnerId: "x", reportDate: today, counts: counts({ cone: "150", cup: "85", powder: "0.05", spoon: "85" }), ...money0, cashSales: "1250", gcashSales: "0" }, { submit: true });
+    expect(r.totalUnits).toBe(50);
+    expect(D(r.netSales).toFixed(2)).toBe("1250.00");
+    expect(r.discrepancyNotes).toMatch(/2 Cones missing at opening — counted as sold/);
     const line = await prisma.salesReportStock.findFirstOrThrow({ where: { reportId: r.id, itemId: ids.cone } });
-    expect(line.opening.toString()).toBe("198");
+    expect(line.opening.toString()).toBe("200");
     const closed = await prisma.shift.findUniqueOrThrow({ where: { id: shift.id } });
     expect(closed.status).toBe("CLOSED");
     expect(closed.reportId).toBe(r.id);

@@ -141,7 +141,9 @@ in date order, and an earlier count can only be reopened after later ones. Daily
 **Partner shifts** — Each business day the partner taps **Open shift**: the portal shows yesterday's closing count, deliveries
 received since, and what they should have now (carried over). One tap confirms; if something differs (e.g. cones missing
 overnight), the partner enters the actual amount — the difference is posted as an audited `COUNT_VARIANCE` and staff are
-alerted (`SHIFT_VARIANCE`). Deliveries confirmed during the shift are added automatically. Submitting the closing count
+alerted (`SHIFT_VARIANCE`). **Missing cones and cups are counted as sold**: they are not written off, so that
+evening's closing count derives them as sales at the partner's price (the report notes "N missing at opening — counted
+as sold"). Other differences (e.g. powder) are posted as a count variance. Deliveries confirmed during the shift are added automatically. Submitting the closing count
 closes the shift (a shift is recorded automatically if the partner forgot to open one); reopening the count reopens the
 shift. A shift left open blocks the next day until its closing count is submitted. Staff see every partner's shift
 status on **Sales → Partner shifts**.

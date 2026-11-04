@@ -70,13 +70,13 @@ export function SettlementStatement({ s, audience }: { s: Settlement & { partner
       </div>
 
       <Card title={`Sales included (${c.salesReports?.length ?? 0} approved reports)`} pad={false}>
-        <div className="max-h-80 overflow-auto"><table className="tbl"><thead><tr><th>Date</th><th>Report</th><th className="num">Gross</th><th className="num">Discounts</th><th className="num">Refunds</th><th className="num">Net</th></tr></thead>
-          <tbody>{(c.salesReports ?? []).map((r) => <tr key={r.id}><td>{fmtDate(r.date)}</td><td className="text-xs">{r.number}</td><td className="num"><Peso v={r.gross} /></td><td className="num"><Peso v={r.discounts} /></td><td className="num"><Peso v={r.refunds} /></td><td className="num"><Peso v={r.net} /></td></tr>)}</tbody></table></div>
+        <div className="sm:max-h-80 sm:overflow-auto"><table className="tbl tbl-stack"><thead><tr><th>Date</th><th>Report</th><th className="num">Gross</th><th className="num">Discounts</th><th className="num">Refunds</th><th className="num">Net</th></tr></thead>
+          <tbody>{(c.salesReports ?? []).map((r) => <tr key={r.id}><td className="stack-title">{fmtDate(r.date)}</td><td data-label="Report" className="text-xs">{r.number}</td><td data-label="Gross" className="num"><Peso v={r.gross} /></td><td data-label="Discounts" className="num"><Peso v={r.discounts} /></td><td data-label="Refunds" className="num"><Peso v={r.refunds} /></td><td data-label="Net" className="num"><Peso v={r.net} /></td></tr>)}</tbody></table></div>
       </Card>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title={`Supplies consumed (${c.movementCount ?? 0} ledger movements)`} pad={false}>
-          <table className="tbl"><thead><tr><th>Item</th><th className="num">Used</th><th className="num">Value</th></tr></thead>
-            <tbody>{(c.supplies ?? []).map((x) => <tr key={x.itemId}><td>{x.name}<div className="text-xs text-choco-500">{Object.entries(x.byType).map(([t, q]) => `${humanize(t)} ${formatQty(q, 3)}`).join(" · ")}</div></td><td className="num">{formatQty(x.quantity, 3)} {x.uom.toLowerCase()}</td><td className="num"><Peso v={x.value} /></td></tr>)}</tbody></table>
+          <table className="tbl tbl-stack"><thead><tr><th>Item</th><th className="num">Used</th><th className="num">Value</th></tr></thead>
+            <tbody>{(c.supplies ?? []).map((x) => <tr key={x.itemId}><td className="stack-title">{x.name}<div className="text-xs text-choco-500">{Object.entries(x.byType).map(([t, q]) => `${humanize(t)} ${formatQty(q, 3)}`).join(" · ")}</div></td><td data-label="Used" className="num">{formatQty(x.quantity, 3)} {x.uom.toLowerCase()}</td><td data-label="Value" className="num"><Peso v={x.value} /></td></tr>)}</tbody></table>
         </Card>
         <Card title="Operating expenses deducted" pad={false}>
           {(c.expenses ?? []).length === 0 ? <p className="p-5 text-sm text-choco-500">None.</p> : (

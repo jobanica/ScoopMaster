@@ -45,7 +45,7 @@ export default async function OpenShiftPage() {
           <div className="space-y-3 p-4">
             <TextArea label="Notes (optional)" name="notes" rows={2} />
             <SubmitButton pendingText="Opening…">Open shift</SubmitButton>
-            <p className="text-xs text-choco-500">Differences are recorded and Scoop Master is notified. Supplies you receive during the day are added automatically when you confirm the delivery.</p>
+            <p className="text-xs text-choco-500">Differences are recorded and Scoop Master is notified. <b>Missing cones or cups are counted as sold</b> in today&apos;s closing. Supplies you receive during the day are added automatically when you confirm the delivery.</p>
           </div>
         </ActionForm>
       </Card>

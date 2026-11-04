@@ -22,8 +22,8 @@ export default async function PortalPayment() {
               <SelectField label="Method" name="method" defaultValue="GCASH" options={[{ value: "GCASH", label: "GCash" }, { value: "BANK_TRANSFER", label: "Bank transfer" }, { value: "CASH", label: "Cash" }, { value: "OTHER", label: "Other" }]} />
               <Field label="Reference no." name="reference" placeholder="GCash ref / deposit slip" />
             </div>
-            <div className="card overflow-hidden"><table className="tbl"><thead><tr><th>Invoice</th><th className="num">Balance</th><th className="num">Pay</th></tr></thead>
-              <tbody>{open.map((i) => <tr key={i.id}><td>{i.number}<div className="text-xs text-choco-500">due {fmtDate(i.dueDate)}</div></td><td className="num"><Peso v={balanceOf(i)} /></td><td className="num"><input className="input w-28 text-right" name={`alloc_${i.id}`} inputMode="decimal" /></td></tr>)}</tbody></table></div>
+            <div className="card overflow-hidden"><table className="tbl tbl-stack"><thead><tr><th>Invoice</th><th className="num">Balance</th><th className="num">Pay</th></tr></thead>
+              <tbody>{open.map((i) => <tr key={i.id}><td className="stack-title">{i.number}<div className="text-xs text-choco-500">due {fmtDate(i.dueDate)}</div></td><td data-label="Balance" className="num"><Peso v={balanceOf(i)} /></td><td data-label="Pay" className="num"><input className="input w-28 text-right" name={`alloc_${i.id}`} inputMode="decimal" /></td></tr>)}</tbody></table></div>
             <label className="block"><span className="label">Proof of payment *</span><input type="file" name="proof" accept="image/png,image/jpeg,image/webp,application/pdf" required className="text-sm" /><span className="mt-1 block text-xs text-choco-500">Photo or screenshot of the GCash/bank receipt (max 10 MB)</span></label>
             <TextArea label="Notes" name="notes" rows={2} />
             <SubmitButton>Submit payment</SubmitButton>

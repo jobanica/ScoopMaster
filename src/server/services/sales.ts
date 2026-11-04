@@ -429,7 +429,8 @@ export async function saveCountReport(actor: Actor, input: CountReportInput, opt
     const tolerance = (await getRule("CASH_DISCREPANCY", tx)).threshold;
     const c = computeSales({ lines: count.lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPrice: l.unitPrice })), discounts: input.discounts || 0, refunds: input.refunds || 0, cashSales: input.cashSales || 0, gcashSales: input.gcashSales || 0, otherSales: input.otherSales || 0, actualCash: input.actualCash || null, tolerance });
     const flagged = count.checks.filter((x) => x.flagged);
-    const discrepancies = [...c.discrepancies, ...flagged.map((x) => `${x.name} used ${x.actualUse.toString()} vs ${x.expectedUse.toString()} needed for the counted sales (${x.variancePct ? `+${x.variancePct.toFixed(0)}%` : "no sales counted"}) — possible unreported sales or excess wastage`)];
+    const missingAtOpening = data.shift ? await tx.shiftLine.findMany({ where: { shiftId: data.shift.id, treatedAsSold: true }, include: { item: true } }) : [];
+    const discrepancies = [...c.discrepancies, ...missingAtOpening.map((m) => `${D(m.variance).abs().toString()} ${m.item.name} missing at opening — counted as sold`), ...flagged.map((x) => `${x.name} used ${x.actualUse.toString()} vs ${x.expectedUse.toString()} needed for the counted sales (${x.variancePct ? `+${x.variancePct.toFixed(0)}%` : "no sales counted"}) — possible unreported sales or excess wastage`)];
     const powderCheck = count.checks.find((x) => x.variancePct !== null);
 
     const reportData = {
