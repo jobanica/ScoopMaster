@@ -16,7 +16,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:demo": "tsx prisma/demo.ts",
     "db:reset": "prisma migrate reset --force",
-    "alerts:run": "tsx scripts/run-alerts.ts"
+    "alerts:run": "tsx scripts/run-alerts.ts",
+    "vercel-build": "prisma generate && prisma migrate deploy && tsx prisma/seed.ts && next build"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

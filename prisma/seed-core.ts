@@ -3,7 +3,7 @@ import { hashPassword } from "../src/lib/password";
 import { DEFAULT_ROLES, DEFAULT_THRESHOLDS } from "../src/server/services/notifications";
 
 /** System configuration required for the app to run. Contains NO business/demo data. */
-export async function seedCore(prisma: PrismaClient, opts: { adminEmail: string; adminPassword: string; adminName?: string }) {
+export async function seedCore(prisma: PrismaClient, opts: { adminEmail: string; adminPassword: string; adminName?: string; skipAdmin?: boolean }) {
   await prisma.location.upsert({ where: { code: "WH-MAIN" }, update: {}, create: { code: "WH-MAIN", name: "Main Warehouse", type: "WAREHOUSE" } });
   await prisma.location.upsert({ where: { code: "IN-TRANSIT" }, update: {}, create: { code: "IN-TRANSIT", name: "In Transit (dispatched, not yet received)", type: "IN_TRANSIT" } });
 
@@ -16,6 +16,7 @@ export async function seedCore(prisma: PrismaClient, opts: { adminEmail: string;
     });
   }
 
+  if (opts.skipAdmin) return;
   const email = opts.adminEmail.toLowerCase();
   const existing = await prisma.user.findUnique({ where: { email } });
   if (!existing) {
