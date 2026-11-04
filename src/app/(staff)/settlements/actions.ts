@@ -9,15 +9,33 @@ export const createSettlementAction = safeAction(async (fd) => {
   const s = await createSettlement(user, { partnerId: str(fd, "partnerId", "Partner"), periodStart: date(fd, "periodStart", "Period start"), periodEnd: date(fd, "periodEnd", "Period end"), notes: optStr(fd, "notes") });
   return `/settlements/${s.id}`;
 });
-const step = (fn: (user: Awaited<ReturnType<typeof requireUser>>, id: string, fd: FormData) => Promise<unknown>, perm: Parameters<typeof requireUser>[0], message: string) =>
-  safeAction(async (fd) => {
-    const user = await requireUser(perm);
-    const id = str(fd, "id");
-    await fn(user, id, fd);
-    return { revalidate: [`/settlements/${id}`], message };
-  });
-export const recalcAction = step((u, id) => recalculateSettlement(u, id), "settlements:prepare", "Recalculated from current approved data.");
-export const submitAction = step((u, id) => submitSettlement(u, id), "settlements:prepare", "Submitted for approval. The period is now locked.");
-export const returnAction = step((u, id, fd) => returnSettlementToDraft(u, id, str(fd, "reason", "Reason")), "settlements:approve", "Returned to draft.");
-export const finalizeAction = step((u, id) => finalizeSettlement(u, id), "settlements:approve", "Settlement finalized.");
-export const voidAction = step((u, id, fd) => voidSettlement(u, id, str(fd, "reason", "Reason")), "settlements:prepare", "Settlement voided.");
+export const recalcAction = safeAction(async (fd) => {
+  const user = await requireUser("settlements:prepare");
+  const id = str(fd, "id");
+  await recalculateSettlement(user, id);
+  return { revalidate: [`/settlements/${id}`], message: "Recalculated from current approved data." };
+});
+export const submitAction = safeAction(async (fd) => {
+  const user = await requireUser("settlements:prepare");
+  const id = str(fd, "id");
+  await submitSettlement(user, id);
+  return { revalidate: [`/settlements/${id}`], message: "Submitted for approval. The period is now locked." };
+});
+export const returnAction = safeAction(async (fd) => {
+  const user = await requireUser("settlements:approve");
+  const id = str(fd, "id");
+  await returnSettlementToDraft(user, id, str(fd, "reason", "Reason"));
+  return { revalidate: [`/settlements/${id}`], message: "Returned to draft." };
+});
+export const finalizeAction = safeAction(async (fd) => {
+  const user = await requireUser("settlements:approve");
+  const id = str(fd, "id");
+  await finalizeSettlement(user, id);
+  return { revalidate: [`/settlements/${id}`], message: "Settlement finalized." };
+});
+export const voidAction = safeAction(async (fd) => {
+  const user = await requireUser("settlements:prepare");
+  const id = str(fd, "id");
+  await voidSettlement(user, id, str(fd, "reason", "Reason"));
+  return { revalidate: [`/settlements/${id}`], message: "Settlement voided." };
+});
