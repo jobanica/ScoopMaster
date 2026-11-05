@@ -84,6 +84,14 @@ model Counter {
   value Int    @default(0)
 }
 
+// Simple key/value settings (e.g. payment QR code and account details shown to partners)
+model AppSetting {
+  key         String   @id
+  value       String
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
 // File bytes when STORAGE_DRIVER=database (serverless hosts without a persistent disk)
 model StoredFile {
   storedName String   @id

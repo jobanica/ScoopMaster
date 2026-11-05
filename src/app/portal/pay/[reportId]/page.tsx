@@ -5,6 +5,7 @@ import { dailyDue } from "@/server/services/daily-pay";
 import { Alert, PageHeader } from "@/components/ui";
 import { ActionForm, DateField, Field, SelectField, SubmitButton, TextArea } from "@/components/forms";
 import { DailyPayCard } from "@/components/daily-pay-card";
+import { PaymentQr } from "@/components/payment-qr";
 import { partnerDailyPayAction } from "../../actions";
 
 export const metadata = { title: "Pay today" };
@@ -16,6 +17,7 @@ export default async function DailyPayPage({ params }: { params: Promise<{ repor
     <div className="space-y-4">
       <PageHeader title="Pay Scoop Master" subtitle={`${due.report.number} · ${fmtDate(due.report.reportDate)}`} back={{ href: `/portal/sales/${due.report.id}`, label: "Report" }} />
       <DailyPayCard due={due} audience="staff" />
+      {due.status === "DUE" && <PaymentQr amount={due.remaining} />}
       {due.status !== "DUE" ? <Alert tone="mint">Nothing to pay for this day right now.</Alert> : (
         <ActionForm action={partnerDailyPayAction} className="card space-y-4 p-4">
           <input type="hidden" name="reportId" value={due.report.id} />

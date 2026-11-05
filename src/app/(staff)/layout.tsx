@@ -32,6 +32,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     { href: "/reports", label: "Reports", icon: "BarChart3", perm: "reports:view", section: "Insights" },
     { href: "/notifications", label: "Notifications", icon: "Bell", perm: "dashboard:view", badge: unread, section: "Insights" },
     { href: "/admin/users", label: "Users", icon: "Users", perm: "users:manage", section: "Administration" },
+    { href: "/admin/payment-settings", label: "Payment Details", icon: "Wallet", perm: "finance:write", section: "Administration" },
     { href: "/admin/notification-rules", label: "Alert Rules", icon: "SlidersHorizontal", perm: "notifications:manage", section: "Administration" },
     { href: "/admin/audit", label: "Audit Log", icon: "ShieldCheck", perm: "audit:read", section: "Administration" },
   ];

@@ -5,6 +5,7 @@ import { balanceOf } from "@/lib/calc/payments";
 import { Card, Empty, PageHeader, Peso } from "@/components/ui";
 import { ActionForm, DateField, Field, SelectField, SubmitButton, TextArea } from "@/components/forms";
 import { partnerPaymentAction } from "../../actions";
+import { PaymentQr } from "@/components/payment-qr";
 
 export const metadata = { title: "Submit payment" };
 export default async function PortalPayment() {
@@ -14,6 +15,8 @@ export default async function PortalPayment() {
     <div>
       <PageHeader title="Submit proof of payment" back={{ href: "/portal/invoices", label: "Invoices" }} />
       {open.length === 0 ? <Empty>You have no open invoices.</Empty> : (
+        <div className="space-y-4">
+        <PaymentQr />
         <Card>
           <ActionForm action={partnerPaymentAction}>
             <div className="grid grid-cols-2 gap-3">
@@ -29,6 +32,7 @@ export default async function PortalPayment() {
             <SubmitButton>Submit payment</SubmitButton>
           </ActionForm>
         </Card>
+        </div>
       )}
     </div>
   );
