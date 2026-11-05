@@ -7,7 +7,7 @@ html, body { background: #FFF8EC; color: #2B1A12; }
 body { font-feature-settings: "tnum" 1; -webkit-font-smoothing: antialiased; }
 
 @layer components {
-  .card { @apply rounded-2xl border border-choco-100 bg-white shadow-card; }
+  .card { @apply rounded-2xl border border-choco-50 bg-white shadow-card; }
   /* 16px on phones so iOS does not zoom when a field is tapped */
   .input { @apply w-full rounded-lg border border-choco-100 bg-white px-3 py-2.5 text-base sm:py-2 sm:text-sm text-choco-900 placeholder:text-choco-300 focus:border-choco-500 focus:outline-none focus:ring-2 focus:ring-choco-500/20 disabled:bg-cream-100; }
   .label { @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-choco-600; }

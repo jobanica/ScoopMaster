@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, LogOut } from "lucide-react";
+import { Bell, ChevronDown, LogOut, Search, UserRound } from "lucide-react";
 import { requirePage } from "@/lib/auth";
 import { can, ROLE_LABEL, type Permission } from "@/lib/rbac";
 import { prisma } from "@/lib/db";
@@ -37,25 +37,49 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     { href: "/admin/audit", label: "Audit Log", icon: "ShieldCheck", perm: "audit:read", section: "Administration" },
   ];
   const items = all.filter((i) => can(user.role, i.perm)).map(({ perm: _p, ...rest }) => rest);
+  const todo = [
+    ...(can(user.role, "sales:review") ? [{ label: "Sales reports to approve", count: pendingSales, href: "/sales?status=SUBMITTED" }] : []),
+    ...(can(user.role, "payments:verify") ? [{ label: "Payments to verify", count: pendingPayments, href: "/finance/payments?status=PENDING_VERIFICATION" }] : []),
+    ...(can(user.role, "supply:review") ? [{ label: "Supply requests", count: pendingSupply, href: "/supply-orders?status=REQUESTED" }] : []),
+  ];
+  const initials = user.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
   return (
-    <div className="min-h-screen">
-      <Sidebar items={items} />
-      <div className="lg:pl-64">
-        <header className="no-print sticky top-0 z-20 flex items-center justify-end gap-3 border-b border-choco-100 bg-cream-50/90 px-4 py-3 backdrop-blur sm:px-6">
-          <Link href="/notifications" className="relative rounded-lg p-2 text-choco-600 hover:bg-cream-200" aria-label="Notifications">
-            <Bell size={18} />
-            {unread > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-berry-500 px-1.5 text-[10px] font-bold text-white">{unread > 99 ? "99+" : unread}</span>}
-          </Link>
-          <div className="text-right">
-            <p className="text-sm font-semibold text-choco-900">{user.name}</p>
-            <p className="text-xs text-choco-500">{ROLE_LABEL[user.role]}</p>
+    <div className="min-h-screen bg-cream-100">
+      <Sidebar items={items} todo={todo} />
+      <div className="lg:pl-[17rem]">
+        <header className="no-print sticky top-0 z-20 px-4 pt-4 sm:px-6 lg:pl-2">
+          <div className="flex min-h-[3.5rem] items-center gap-3 rounded-2xl bg-white/95 py-2.5 pl-14 pr-3 shadow-card backdrop-blur lg:pl-4">
+            <form action="/search" className="relative hidden flex-1 sm:block sm:max-w-md">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-choco-300" />
+              <input name="q" type="search" placeholder="Search partners, machines, reports, invoices…" className="w-full rounded-full border border-choco-50 bg-cream-50 py-2 pl-9 pr-4 text-base text-choco-900 placeholder:text-choco-300 focus:border-choco-300 focus:outline-none sm:text-sm" />
+            </form>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Link href="/search" className="rounded-full p-2 text-choco-600 hover:bg-cream-100 sm:hidden" aria-label="Search"><Search size={18} /></Link>
+              <Link href="/notifications" className="relative rounded-full p-2 text-choco-600 hover:bg-cream-100" aria-label="Notifications">
+                <Bell size={18} />
+                {unread > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-berry-500 px-1.5 text-[10px] font-bold text-white">{unread > 99 ? "99+" : unread}</span>}
+              </Link>
+              <details className="relative">
+                <summary className="flex cursor-pointer list-none items-center gap-2 rounded-full py-1 pl-1 pr-2 hover:bg-cream-100 [&::-webkit-details-marker]:hidden">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-choco-700 text-xs font-bold text-cream-50">{initials}</span>
+                  <span className="hidden text-left sm:block">
+                    <span className="block text-sm font-semibold leading-tight text-choco-900">{user.name}</span>
+                    <span className="block text-[11px] text-choco-500">{ROLE_LABEL[user.role]}</span>
+                  </span>
+                  <ChevronDown size={14} className="text-choco-400" />
+                </summary>
+                <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-choco-50 bg-white py-1 shadow-xl">
+                  <p className="px-4 py-2 text-xs text-choco-500">{user.email}</p>
+                  <Link href="/notifications" className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-cream-50"><Bell size={15} /> Notifications</Link>
+                  {can(user.role, "users:manage") && <Link href="/admin/users" className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-cream-50"><UserRound size={15} /> Users &amp; passwords</Link>}
+                  <form action={logoutAction}><button className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-berry-700 hover:bg-cream-50"><LogOut size={15} /> Sign out</button></form>
+                </div>
+              </details>
+            </div>
           </div>
-          <form action={logoutAction}>
-            <button className="rounded-lg p-2 text-choco-600 hover:bg-cream-200" aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
-          </form>
         </header>
-        <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
+        <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:pl-2">{children}</main>
       </div>
     </div>
   );

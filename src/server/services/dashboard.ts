@@ -127,3 +127,56 @@ export async function dashboardData(f: DashboardFilters) {
     range: { from: ymd(f.from), to: ymd(f.to) },
   };
 }
+
+/** Totals for one period — used to compare the selected period with the one before it. */
+export async function periodTotals(f: DashboardFilters) {
+  const range = { gte: f.from, lte: f.to };
+  const partnerScope: Prisma.PartnerWhereInput = { ...(f.partnerId ? { id: f.partnerId } : {}), ...(f.area ? { area: { contains: f.area, mode: "insensitive" } } : {}) };
+  const [sales, settlements, supply] = await Promise.all([
+    prisma.salesReport.aggregate({ where: salesWhere(f, range), _sum: { netSales: true, estimatedCogs: true, totalUnits: true }, _count: true }),
+    prisma.settlement.aggregate({ where: { status: "FINALIZED", periodEnd: range, partner: partnerScope }, _sum: { ownerShare: true, partnerShare: true } }),
+    prisma.invoice.aggregate({ where: { type: "SUPPLY", status: { not: "CANCELLED" }, issueDate: range, partner: partnerScope }, _sum: { amount: true, costAmount: true } }),
+  ]);
+  return {
+    sales: money(sales._sum.netSales),
+    grossProfit: money(D(sales._sum.netSales).minus(D(sales._sum.estimatedCogs))),
+    units: sales._sum.totalUnits ?? 0,
+    reports: sales._count,
+    ownerIncome: money(settlements._sum.ownerShare),
+    partnerEarnings: money(settlements._sum.partnerShare),
+    supplyMarkup: money(D(supply._sum.amount).minus(D(supply._sum.costAmount))),
+  };
+}
+
+/** % change vs the previous period (null when there is nothing to compare with). */
+export function pctChange(now: Decimal | number, before: Decimal | number): Decimal | null {
+  const b = D(before);
+  if (b.isZero()) return null;
+  return D(now).minus(b).dividedBy(b.abs()).times(100);
+}
+
+/** One row per partner for the dashboard table: period sales, gross profit, what they owe. */
+export async function partnerPerformance(f: DashboardFilters, q?: string) {
+  const today = todayDate();
+  const partners = await prisma.partner.findMany({
+    where: {
+      status: { in: ["ACTIVE", "ON_HOLD", "PENDING_APPROVAL"] },
+      ...(f.partnerId ? { id: f.partnerId } : {}),
+      ...(f.area ? { area: { contains: f.area, mode: "insensitive" } } : {}),
+      ...(q ? { OR: [{ businessName: { contains: q, mode: "insensitive" } }, { code: { contains: q, mode: "insensitive" } }, { area: { contains: q, mode: "insensitive" } }] } : {}),
+    },
+    include: { machines: { select: { code: true } } },
+  });
+  const ids = partners.map((p) => p.id);
+  const [sales, open] = await Promise.all([
+    prisma.salesReport.groupBy({ by: ["partnerId"], where: { ...salesWhere({ ...f, partnerId: undefined }, { gte: f.from, lte: f.to }), partnerId: { in: ids } }, _sum: { netSales: true, estimatedProfit: true, totalUnits: true }, _max: { reportDate: true } }),
+    prisma.invoice.findMany({ where: { partnerId: { in: ids }, status: { in: ["UNPAID", "PARTIALLY_PAID"] } }, select: { partnerId: true, amount: true, amountPaid: true, dueDate: true } }),
+  ]);
+  return partners.map((p) => {
+    const s = sales.find((x) => x.partnerId === p.id);
+    const inv = open.filter((i) => i.partnerId === p.id);
+    const owed = inv.reduce((a, i) => a.plus(balanceOf(i)), new Decimal(0));
+    const overdue = inv.filter((i) => i.dueDate < today).reduce((a, i) => a.plus(balanceOf(i)), new Decimal(0));
+    return { partner: p, sales: money(s?._sum.netSales), profit: money(s?._sum.estimatedProfit), units: s?._sum.totalUnits ?? 0, lastReport: s?._max.reportDate ?? null, owed: money(owed), overdue: money(overdue) };
+  }).sort((a, b) => b.sales.comparedTo(a.sales));
+}
